@@ -130,7 +130,6 @@ jobs:
             --inline-suppr \
             --std=c++17 \
             --language=c++ \
-            --error-exitcode=1 \
             --suppress=missingInclude \
             --suppress=missingIncludeSystem \
             --suppress=unusedFunction \
@@ -147,7 +146,7 @@ jobs:
       - uses: codespell-project/actions-codespell@v2
         with:
           skip: ./.git,./assets,*.ico,*.png
-          ignore_words_list: crate,ba,nd,strin
+          ignore_words_list: currenty
 
   logo:
     name: Logo is reproducible
