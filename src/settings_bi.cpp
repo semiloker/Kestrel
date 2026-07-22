@@ -175,6 +175,7 @@ void settings_bi::applyTo(resource_usage_bi *ru, overlay_bi *ov,
 
         ru->gpuInfo.show_gpuName = getBool("gpu.name", ru->gpuInfo.show_gpuName);
         ru->gpuInfo.show_gpuLoad = getBool("gpu.load", ru->gpuInfo.show_gpuLoad);
+        ru->gpuInfo.show_vram = getBool("gpu.vram", ru->gpuInfo.show_vram);
 
         ru->minimize_To_Tray = getBool("app.minimizeToTray", ru->minimize_To_Tray);
         ru->exit_on_key_esc = getBool("app.exitOnEsc", ru->exit_on_key_esc);
@@ -184,6 +185,10 @@ void settings_bi::applyTo(resource_usage_bi *ru, overlay_bi *ov,
     {
         ov->show_on_screen_display = getBool("hud.enabled", ov->show_on_screen_display);
         ov->margin = getInt("hud.margin", ov->margin);
+
+        int refresh = getInt("hud.refreshMs", ov->refreshMs);
+        if (refresh >= 30 && refresh <= 2000)
+            ov->refreshMs = refresh;
 
         int corner = getInt("hud.corner", (int)ov->corner);
         if (corner >= 0 && corner <= (int)overlay_bi::CORNER_BOTTOM_RIGHT)
@@ -200,6 +205,9 @@ void settings_bi::applyTo(resource_usage_bi *ru, overlay_bi *ov,
         ov->hud.showDisplay = getBool("hud.display", ov->hud.showDisplay);
         ov->hud.showMem = getBool("hud.mem", ov->hud.showMem);
         ov->hud.showLows = getBool("hud.lows", ov->hud.showLows);
+        ov->hud.showBottleneck = getBool("hud.bottleneck", ov->hud.showBottleneck);
+        ov->hud.showEfficiency = getBool("hud.efficiency", ov->hud.showEfficiency);
+        ov->hud.showChargerDeficit = getBool("hud.chargerDeficit", ov->hud.showChargerDeficit);
     }
 
     if (draw)
@@ -249,6 +257,7 @@ void settings_bi::collectFrom(const resource_usage_bi *ru, const overlay_bi *ov,
 
         setBool("gpu.name", ru->gpuInfo.show_gpuName);
         setBool("gpu.load", ru->gpuInfo.show_gpuLoad);
+        setBool("gpu.vram", ru->gpuInfo.show_vram);
 
         setBool("app.minimizeToTray", ru->minimize_To_Tray);
         setBool("app.exitOnEsc", ru->exit_on_key_esc);
@@ -258,6 +267,7 @@ void settings_bi::collectFrom(const resource_usage_bi *ru, const overlay_bi *ov,
     {
         setBool("hud.enabled", ov->show_on_screen_display);
         setInt("hud.margin", ov->margin);
+        setInt("hud.refreshMs", ov->refreshMs);
         setInt("hud.corner", (int)ov->corner);
 
         for (int i = 0; i < HUD_M_COUNT; ++i)
@@ -271,6 +281,9 @@ void settings_bi::collectFrom(const resource_usage_bi *ru, const overlay_bi *ov,
         setBool("hud.display", ov->hud.showDisplay);
         setBool("hud.mem", ov->hud.showMem);
         setBool("hud.lows", ov->hud.showLows);
+        setBool("hud.bottleneck", ov->hud.showBottleneck);
+        setBool("hud.efficiency", ov->hud.showEfficiency);
+        setBool("hud.chargerDeficit", ov->hud.showChargerDeficit);
     }
 
     if (draw)

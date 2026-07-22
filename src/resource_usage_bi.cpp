@@ -244,6 +244,13 @@ bool resource_usage_bi::openSharedQuery()
         log_bi::write("pdh: no GPU Engine counter, gpu load and gpu ms disabled");
     }
 
+    if (PdhAddEnglishCounterW(sharedQuery, L"\\GPU Adapter Memory(*)\\Dedicated Usage",
+                              0, &vramCounter) != ERROR_SUCCESS)
+    {
+        vramCounter = NULL;
+        log_bi::write("pdh: no GPU Adapter Memory counter, vram usage disabled");
+    }
+
     PDH_STATUS powerAdded = PdhAddEnglishCounterW(sharedQuery, L"\\Energy Meter(*)\\Power",
                                                   0, &powerCounter);
     if (powerAdded != ERROR_SUCCESS)
@@ -267,7 +274,9 @@ bool resource_usage_bi::collectShared()
     if (!openSharedQuery())
         return false;
 
-    if (PdhCollectQueryData(sharedQuery) != ERROR_SUCCESS)
+    PDH_STATUS status = PdhCollectQueryData(sharedQuery);
+
+    if (status != ERROR_SUCCESS)
         return false;
 
     sharedCollected = true;
@@ -343,11 +352,227 @@ void resource_usage_bi::initGpuInfo()
         gpuInfo.gpuName = "Unknown GPU";
 
     gpuInfo.gpuLoad = "0.00 %";
+
+    IDXGIFactory1 *factory = NULL;
+    if (SUCCEEDED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void **)&factory)) && factory)
+    {
+        IDXGIAdapter1 *adapter = NULL;
+        SIZE_T best = 0;
+
+        for (UINT i = 0; factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i)
+        {
+            DXGI_ADAPTER_DESC1 desc;
+            if (SUCCEEDED(adapter->GetDesc1(&desc)))
+            {
+                bool software = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+
+                if (!software && desc.DedicatedVideoMemory > best)
+                    best = desc.DedicatedVideoMemory;
+            }
+
+            adapter->Release();
+            adapter = NULL;
+        }
+
+        if (best > 0)
+            gpuInfo.vramTotalMB = (double)best / (1024.0 * 1024.0);
+
+        factory->Release();
+    }
+
+    if (gpuInfo.vramTotalMB <= 0.0)
+        log_bi::write("vram: no dedicated video memory reported by DXGI");
 }
 
 bool resource_usage_bi::updateGpu()
 {
     return updateGpuTime(0, NULL);
+}
+
+DWORD WINAPI resource_usage_bi::samplerEntry(LPVOID param)
+{
+    ((resource_usage_bi *)param)->samplerLoop();
+    return 0;
+}
+
+void resource_usage_bi::samplerLoop()
+{
+    for (;;)
+    {
+        DWORD interval = (DWORD)InterlockedCompareExchange(&samplerIntervalMs, 0, 0);
+        if (interval < 50)
+            interval = 50;
+
+        if (WaitForSingleObject(samplerStop, interval) != WAIT_TIMEOUT)
+            return;
+
+        if (!collectShared())
+            continue;
+
+        updateCpu();
+        updateCpuPower();
+        updateGpuMemory();
+        updateRam();
+
+        DWORD pid = (DWORD)InterlockedCompareExchange(&samplerTargetPid, 0, 0);
+
+        double busyMs = 0.0;
+        bool busyOk = updateGpuTime(pid, &busyMs);
+
+        publishSample(busyMs, busyOk);
+
+    }
+}
+
+void resource_usage_bi::publishSample(double gpuBusyMs, bool gpuBusyValid)
+{
+    if (!publishLockReady)
+        return;
+
+    EnterCriticalSection(&publishLock);
+
+    pubCpu = cpuInfo;
+    pubRam = ramInfo;
+    pubGpu = gpuInfo;
+    pubGpuBusyMs = gpuBusyMs;
+    pubGpuBusyValid = gpuBusyValid;
+
+    LeaveCriticalSection(&publishLock);
+}
+
+void resource_usage_bi::readSnapshot(CpuInfo *cpu, RamInfo *ram, GpuInfo *gpu,
+                                     double *gpuBusyMs, bool *gpuBusyValid)
+{
+    if (!publishLockReady)
+        return;
+
+    EnterCriticalSection(&publishLock);
+
+    if (cpu)
+        *cpu = pubCpu;
+    if (ram)
+        *ram = pubRam;
+    if (gpu)
+        *gpu = pubGpu;
+    if (gpuBusyMs)
+        *gpuBusyMs = pubGpuBusyMs;
+    if (gpuBusyValid)
+        *gpuBusyValid = pubGpuBusyValid;
+
+    LeaveCriticalSection(&publishLock);
+}
+
+void resource_usage_bi::setSamplerInterval(int intervalMs)
+{
+    if (intervalMs < 50)
+        intervalMs = 50;
+    if (intervalMs > 5000)
+        intervalMs = 5000;
+
+    InterlockedExchange(&samplerIntervalMs, (LONG)intervalMs);
+}
+
+void resource_usage_bi::setSamplerTarget(DWORD pid)
+{
+    InterlockedExchange(&samplerTargetPid, (LONG)pid);
+}
+
+void resource_usage_bi::startSampler(int intervalMs)
+{
+    if (samplerThread)
+        return;
+
+    setSamplerInterval(intervalMs);
+
+    samplerStop = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (!samplerStop)
+    {
+        log_bi::write("sampler: could not create the stop event");
+        return;
+    }
+
+    samplerThread = CreateThread(NULL, 0, &resource_usage_bi::samplerEntry, this, 0, NULL);
+
+    if (!samplerThread)
+    {
+        log_bi::write("sampler: could not start the worker thread");
+        CloseHandle(samplerStop);
+        samplerStop = NULL;
+        return;
+    }
+
+    log_bi::write("sampler: worker started at %d ms", intervalMs);
+}
+
+void resource_usage_bi::stopSampler()
+{
+    if (!samplerThread)
+        return;
+
+    if (samplerStop)
+        SetEvent(samplerStop);
+
+    WaitForSingleObject(samplerThread, 4000);
+
+    CloseHandle(samplerThread);
+    samplerThread = NULL;
+
+    if (samplerStop)
+    {
+        CloseHandle(samplerStop);
+        samplerStop = NULL;
+    }
+}
+
+bool resource_usage_bi::updateGpuMemory()
+{
+    gpuInfo.vramAvailable = false;
+
+    if (!sharedCollected || vramCounter == NULL)
+        return false;
+
+    DWORD bufferSize = 0;
+    DWORD itemCount = 0;
+
+    PDH_STATUS status = PdhGetFormattedCounterArrayW(vramCounter, PDH_FMT_LARGE,
+                                                     &bufferSize, &itemCount, NULL);
+    if (status != (PDH_STATUS)PDH_MORE_DATA || bufferSize == 0)
+        return false;
+
+    vramBuffer.resize(bufferSize);
+    PDH_FMT_COUNTERVALUE_ITEM_W *items =
+        reinterpret_cast<PDH_FMT_COUNTERVALUE_ITEM_W *>(&vramBuffer[0]);
+
+    if (PdhGetFormattedCounterArrayW(vramCounter, PDH_FMT_LARGE,
+                                     &bufferSize, &itemCount, items) != ERROR_SUCCESS)
+        return false;
+
+    LONGLONG total = 0;
+
+    for (DWORD i = 0; i < itemCount; ++i)
+    {
+        if (items[i].FmtValue.CStatus != ERROR_SUCCESS)
+            continue;
+
+        if (items[i].FmtValue.largeValue > 0)
+            total += items[i].FmtValue.largeValue;
+    }
+
+    if (total <= 0)
+    {
+        if (!vramLogged)
+        {
+            log_bi::write("vram: GPU Adapter Memory reported nothing across %lu instances",
+                          (unsigned long)itemCount);
+            vramLogged = true;
+        }
+        return false;
+    }
+
+    gpuInfo.vramUsedMB = (double)total / (1024.0 * 1024.0);
+    gpuInfo.vramAvailable = true;
+
+    return true;
 }
 
 bool resource_usage_bi::updateCpuPower()

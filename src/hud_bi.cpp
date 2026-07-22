@@ -333,6 +333,67 @@ static double clampDisplay(double v)
     return v;
 }
 
+static void fmtLeft(char *buf, size_t n, const char *label, const char *value,
+                    const char *unit)
+{
+    snprintf(buf, n, "%-4s %6s %-2s", label, value, unit);
+}
+
+static double clampField(double value, int decimals)
+{
+    double high = 999999.0;
+    double low = -99999.0;
+
+    if (decimals == 1)
+    {
+        high = 9999.9;
+        low = -999.9;
+    }
+    else if (decimals >= 2)
+    {
+        high = 999.99;
+        low = -99.99;
+    }
+
+    if (value > high)
+        return high;
+    if (value < low)
+        return low;
+
+    return value;
+}
+
+static void fmtLeftNum(char *buf, size_t n, const char *label, double value,
+                       int decimals, const char *unit)
+{
+    char text[24];
+    snprintf(text, sizeof(text), "%.*f", decimals, clampField(value, decimals));
+    fmtLeft(buf, n, label, text, unit);
+}
+
+static void fmtRight(char *buf, size_t n, const char *a, const char *b)
+{
+    snprintf(buf, n, "[%6s %6s]", a, b);
+}
+
+static void fmtRightPhrase(char *buf, size_t n, const char *phrase)
+{
+    snprintf(buf, n, "[%13s]", phrase);
+}
+
+static void fmtRightTotalPct(char *buf, size_t n, double total, int decimals, double percent)
+{
+    char text[24];
+    snprintf(text, sizeof(text), "%.*f", decimals, clampField(total, decimals));
+
+    if (percent > 999.0)
+        percent = 999.0;
+    if (percent < 0.0)
+        percent = 0.0;
+
+    snprintf(buf, n, "[%6s %5.0f%%]", text, percent);
+}
+
 static void formatMetricLeft(const hud_metric_bi &m, char *buf, size_t n)
 {
     if (!m.available || m.series.size() == 0)
@@ -393,6 +454,22 @@ void hud_bi::buildLayoutInto(std::vector<hud_element_bi> &out) const
     char left[64];
     char right[64];
 
+    if (capturing)
+    {
+        int mins = (int)(captureSeconds / 60.0);
+        int secs = (int)captureSeconds % 60;
+
+        char clock[24];
+        char frames[24];
+
+        snprintf(clock, sizeof(clock), "%d:%02d", mins, secs);
+        snprintf(frames, sizeof(frames), "%u", (unsigned)captureFrames);
+
+        fmtLeft(left, sizeof(left), "REC:", clock, "");
+        fmtRight(right, sizeof(right), frames, "frames");
+        pushRow(out, n, left, right, HUD_COLOR_RED);
+    }
+
     if (showDevice)
         pushRow(out, n, deviceName, resolution, HUD_COLOR_WHITE);
 
@@ -413,20 +490,72 @@ void hud_bi::buildLayoutInto(std::vector<hud_element_bi> &out) const
             formatMetricRight(m, right, sizeof(right));
             pushRow(out, n, left, right, m.color);
 
-            if (i == HUD_M_FPS && showLows && m.series.size() > 0)
+            if (i == HUD_M_FPS && showLows)
             {
-                if (m.available)
+                char one[24];
+                char tenth[24];
+
+                if (m.available && low1Valid)
+                    snprintf(one, sizeof(one), "%.1f", clampDisplay(low1PercentFps));
+                else
+                    snprintf(one, sizeof(one), "%s", "-");
+
+                if (m.available && low01Valid)
+                    snprintf(tenth, sizeof(tenth), "%.1f", clampDisplay(low01PercentFps));
+                else
+                    snprintf(tenth, sizeof(tenth), "%s", "-");
+
+                fmtLeft(left, sizeof(left), "Low:", "1/0.1", "%");
+                fmtRight(right, sizeof(right), one, tenth);
+                pushRow(out, n, left, right, HUD_COLOR_WHITE);
+            }
+
+            if (i == HUD_M_FPS && showBottleneck)
+            {
+                bool known = m.available && bottleneck != BOUND_UNKNOWN;
+                hud_color_bi tone = HUD_COLOR_WHITE;
+                const char *phrase = "-";
+
+                switch (bottleneck)
                 {
-                    snprintf(right, sizeof(right), "[%6.2f %6.2f]",
-                             clampDisplay(m.series.percentile(0.01)),
-                             clampDisplay(m.series.percentile(0.001)));
+                case BOUND_GPU:
+                    phrase = "GPU bound";
+                    tone = HUD_COLOR_GREEN;
+                    break;
+                case BOUND_CPU:
+                    phrase = "CPU bound";
+                    tone = HUD_COLOR_BLUE;
+                    break;
+                case BOUND_MIXED:
+                    phrase = "balanced";
+                    break;
+                default:
+                    break;
+                }
+
+                if (known)
+                {
+                    fmtLeftNum(left, sizeof(left), "Bnd:", bottleneckRatio * 100.0, 0, "%");
                 }
                 else
                 {
-                    snprintf(right, sizeof(right), "[%6s %6s]", "-", "-");
+                    fmtLeft(left, sizeof(left), "Bnd:", "-", "");
+                    tone = HUD_COLOR_WHITE;
                 }
 
-                pushRow(out, n, "Low 1%/0.1%", right, HUD_COLOR_WHITE);
+                fmtRightPhrase(right, sizeof(right), phrase);
+                pushRow(out, n, left, right, tone);
+            }
+
+            if (i == HUD_M_CPUW && showEfficiency)
+            {
+                if (efficiencyValid)
+                    fmtLeftNum(left, sizeof(left), "Eff:", efficiencyFpsPerWatt, 2, "");
+                else
+                    fmtLeft(left, sizeof(left), "Eff:", "-", "");
+
+                fmtRightPhrase(right, sizeof(right), "frames per W");
+                pushRow(out, n, left, right, HUD_COLOR_ORANGE);
             }
         }
 
@@ -453,9 +582,43 @@ void hud_bi::buildLayoutInto(std::vector<hud_element_bi> &out) const
 
     if (showMem)
     {
-        snprintf(left, sizeof(left), "%-4s %5.2fGB", "Mem:", memUsedGB);
-        snprintf(right, sizeof(right), "[%.2fGB]", memTotalGB);
+        fmtLeftNum(left, sizeof(left), "Mem:", memUsedGB, 2, "GB");
+
+        if (memTotalGB > 0.0)
+            fmtRightTotalPct(right, sizeof(right), memTotalGB, 2,
+                             (memUsedGB / memTotalGB) * 100.0);
+        else
+            fmtRight(right, sizeof(right), "-", "-");
+
         pushRow(out, n, left, right, HUD_COLOR_WHITE);
+    }
+
+    if (showVram)
+    {
+        if (vramAvailable)
+        {
+            fmtLeftNum(left, sizeof(left), "VRM:", vramUsedMB, 0, "MB");
+
+            if (vramTotalMB > 0.0)
+                fmtRightTotalPct(right, sizeof(right), vramTotalMB, 0,
+                                 (vramUsedMB / vramTotalMB) * 100.0);
+            else
+                fmtRight(right, sizeof(right), "-", "-");
+        }
+        else
+        {
+            fmtLeft(left, sizeof(left), "VRM:", "-", "MB");
+            fmtRight(right, sizeof(right), "-", "-");
+        }
+
+        pushRow(out, n, left, right, HUD_COLOR_GREEN);
+    }
+
+    if (showChargerDeficit && chargerDeficit)
+    {
+        fmtLeftNum(left, sizeof(left), "Chg:", chargerDeficitW, 1, "W");
+        fmtRightPhrase(right, sizeof(right), "charger short");
+        pushRow(out, n, left, right, HUD_COLOR_RED);
     }
 
     for (size_t i = 0; i < extraRows.size(); ++i)

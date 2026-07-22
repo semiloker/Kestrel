@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "BatteryInfo.h"
+#include "capture_bi.h"
 #include "init_dwrite_bi.h"
 #include "overlay_bi.h"
 #include "resource_usage_bi.h"
@@ -23,6 +24,7 @@ public:
     {
         BATTERY_INFO = 0,
         SETTINGS,
+        CAPTURE,
         APPEARANCE,
         ABOUT_ME,
         TAB_COUNT
@@ -41,6 +43,7 @@ public:
         HIT_ACCENT,
         HIT_CORNER,
         HIT_MARGIN,
+        HIT_REFRESH,
         HIT_ACTION
     };
 
@@ -55,7 +58,22 @@ public:
         ACT_CHECK_UPDATE,
         ACT_DOWNLOAD_UPDATE,
         ACT_INSTALL_UPDATE,
-        ACT_ROLLBACK
+        ACT_ROLLBACK,
+        ACT_TOGGLE_CAPTURE,
+        ACT_OPEN_CAPTURES
+    };
+
+    struct capture_view_bi
+    {
+        bool recording = false;
+        double seconds = 0.0;
+        size_t frames = 0;
+        double liveFps = 0.0;
+        double liveLow1 = 0.0;
+        bool liveLow1Valid = false;
+        bool hasLast = false;
+        capture_bi::summary_bi last;
+        std::vector<capture_bi::summary_bi> history;
     };
 
     struct update_view_bi
@@ -98,6 +116,7 @@ public:
         bool needsBrushRebuild = false;
         bool toggledAutostart = false;
         bool toggledAdmin = false;
+        bool refreshChanged = false;
         int action = ACT_NONE;
     };
 
@@ -121,6 +140,8 @@ public:
     void drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite_bi *dw, batteryinfo_bi *bi);
     void drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrite_bi *dw,
                          overlay_bi *ov, resource_usage_bi *ru, batteryinfo_bi *bi);
+    void drawCaptureTab(ID2D1HwndRenderTarget *pRT, init_dwrite_bi *dw,
+                        const capture_view_bi &cap);
     void drawAppearanceTab(ID2D1HwndRenderTarget *pRT, init_dwrite_bi *dw, overlay_bi *ov);
     void drawAboutTab(ID2D1HwndRenderTarget *pRT, init_dwrite_bi *dw, const diag_bi &diag,
                       const update_view_bi &upd);
@@ -128,6 +149,12 @@ public:
 
     click_result_bi handleClick(POINT cursorPos, overlay_bi *ov,
                                 resource_usage_bi *ru, batteryinfo_bi *bi);
+
+    void applyPresetExternal(int preset, overlay_bi *ov, resource_usage_bi *ru,
+                             batteryinfo_bi *bi)
+    {
+        applyPreset(preset, ov, ru, bi);
+    }
 
     bool setHover(POINT cursorPos);
     bool clearHover();
@@ -153,7 +180,7 @@ public:
     float contentHeight = 0.0f;
     float viewHeight = 0.0f;
 
-    float tabScroll[TAB_COUNT] = {0.0f, 0.0f, 0.0f, 0.0f};
+    float tabScroll[TAB_COUNT] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 
 private:
     struct palette_bi
@@ -221,8 +248,6 @@ private:
 
     int buildGroupRows(int group, overlay_bi *ov, resource_usage_bi *ru,
                        batteryinfo_bi *bi, std::vector<row_bi> &out) const;
-    int countEnabled(int group, overlay_bi *ov, resource_usage_bi *ru,
-                     batteryinfo_bi *bi) const;
     void applyPreset(int preset, overlay_bi *ov, resource_usage_bi *ru, batteryinfo_bi *bi);
     int detectPreset(overlay_bi *ov, resource_usage_bi *ru, batteryinfo_bi *bi);
     void snapshotRows(overlay_bi *ov, resource_usage_bi *ru, batteryinfo_bi *bi,
@@ -248,6 +273,12 @@ private:
     bool nightMode;
 
     int settingsGroup = GROUP_OVERLAY;
+
+    int cachedPreset = -1;
+    bool settingsDirty = true;
+    mutable std::vector<row_bi> rowScratch;
+    mutable std::vector<hud_element_bi> panelScratch;
+    float previewScale = 1.0f;
 
     ID2D1HwndRenderTarget *rt = nullptr;
     ID2D1SolidColorBrush *pBrush = nullptr;

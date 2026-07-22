@@ -18,9 +18,9 @@
 #define APP_ISSUES_URL "https://github.com/semiloker/Kestrel/issues"
 #define APP_LICENCE_URL "https://github.com/semiloker/Kestrel/blob/main/LICENSE"
 
-#define APP_VERSION_STRING "1.2.0.0"
+#define APP_VERSION_STRING "1.3.0.0"
 #define APP_VERSION_MAJOR 1
-#define APP_VERSION_MINOR 2
+#define APP_VERSION_MINOR 3
 #define APP_VERSION_PATCH 0
 #define APP_VERSION_BUILD 0
 

@@ -8,6 +8,7 @@
 #include <string>
 
 #define ETW_MAX_SOURCES 12
+#define ETW_FRAME_RING 8192
 
 class etw_bi
 {
@@ -44,6 +45,12 @@ public:
                       presents(0), pid(0), isForeground(false), api(API_NONE) {}
     };
 
+    struct frame_sample_bi
+    {
+        LONGLONG time100ns;
+        float intervalMs;
+    };
+
     etw_bi();
     ~etw_bi();
 
@@ -58,6 +65,9 @@ public:
     DWORD target() const { return targetPid; }
 
     sample_bi sample();
+
+    size_t drainFrames(frame_sample_bi *out, size_t max);
+    unsigned long long framesDropped() const { return frameLost; }
 
     void setFallbackSource(provider_bi provider, unsigned eventId);
     void setDeepCensus(bool enabled) { deepCensus = enabled; }
@@ -146,6 +156,12 @@ private:
     LONGLONG lastHealth100ns;
     ULONG lastEventsLost;
     ULONG lastBuffersLost;
+
+    frame_sample_bi frameRing[ETW_FRAME_RING];
+    unsigned long long frameWritten;
+    unsigned long long frameDrained;
+    unsigned long long frameLost;
+    DWORD frameOwnerPid;
 };
 
 #endif

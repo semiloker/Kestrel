@@ -11,6 +11,10 @@
 const char win_bi::szClassName[] = APP_WINDOW_CLASS;
 
 #define HOTKEY_TOGGLE_HUD 1
+#define HOTKEY_PRESET_MINIMAL 2
+#define HOTKEY_PRESET_GAMING 3
+#define HOTKEY_PRESET_EVERYTHING 4
+#define HOTKEY_CAPTURE 5
 
 #define WINDOW_DIP_W 550
 #define WINDOW_DIP_H 750
@@ -279,6 +283,11 @@ void win_bi::OnPaint(HWND hwnd)
             draw_bibi_bi->drawSettingsTab(pRenderTarget, initdwrite_bi.get(),
                                           ov_bi.get(), ru_bi.get(), bi_bi.get());
         }
+        else if (draw_bibi_bi->selectedTab == draw_batteryinfo_bi::CAPTURE)
+        {
+            draw_bibi_bi->drawCaptureTab(pRenderTarget, initdwrite_bi.get(),
+                                         BuildCaptureView());
+        }
         else if (draw_bibi_bi->selectedTab == draw_batteryinfo_bi::APPEARANCE)
         {
             draw_bibi_bi->drawAppearanceTab(pRenderTarget, initdwrite_bi.get(), ov_bi.get());
@@ -291,7 +300,14 @@ void win_bi::OnPaint(HWND hwnd)
             view.message = updater->message();
             view.progress = updater->progressPercent();
             view.backupAvailable = updater->backupExists();
-            view.backupVersion = updater->backupVersion();
+
+            if (view.backupAvailable && !backupVersionLoaded)
+            {
+                cachedBackupVersion = updater->backupVersion();
+                backupVersionLoaded = true;
+            }
+
+            view.backupVersion = view.backupAvailable ? cachedBackupVersion : std::string();
 
             draw_bibi_bi->drawAboutTab(pRenderTarget, initdwrite_bi.get(),
                                        BuildDiagnostics(), view);
@@ -337,8 +353,26 @@ void win_bi::OnDpiChanged(WPARAM wParam, LPARAM lParam)
 
 void win_bi::OnHotKey(WPARAM wParam)
 {
-    if (wParam == HOTKEY_TOGGLE_HUD)
+    switch (wParam)
+    {
+    case HOTKEY_TOGGLE_HUD:
         ToggleOverlay();
+        break;
+
+    case HOTKEY_PRESET_MINIMAL:
+    case HOTKEY_PRESET_GAMING:
+    case HOTKEY_PRESET_EVERYTHING:
+        draw_bibi_bi->applyPresetExternal((int)(wParam - HOTKEY_PRESET_MINIMAL),
+                                          ov_bi.get(), ru_bi.get(), bi_bi.get());
+        SaveSettings();
+        UpdateOverlayHud();
+        InvalidateRect(hwnd, NULL, TRUE);
+        break;
+
+    case HOTKEY_CAPTURE:
+        ToggleCapture();
+        break;
+    }
 }
 
 void win_bi::ToggleOverlay()
@@ -452,12 +486,21 @@ void win_bi::OnCreate(HWND hwnd)
     SetTimer(hwnd, 1, 1000, NULL);
     SetTimer(hwnd, 2, 10000, NULL);
 
-    SetTimer(hwnd, 3, HUD_SAMPLE_INTERVAL_MS, NULL);
+    SetTimer(hwnd, 3, (UINT)(ov_bi ? ov_bi->refreshMs : HUD_SAMPLE_INTERVAL_MS), NULL);
 
     if (!RegisterHotKey(hwnd, HOTKEY_TOGGLE_HUD, MOD_CONTROL | MOD_ALT, 'H'))
         log_bi::writeErr(GetLastError(), "hotkey: Ctrl+Alt+H already taken by another app");
 
+    RegisterHotKey(hwnd, HOTKEY_PRESET_MINIMAL, MOD_CONTROL | MOD_ALT, '1');
+    RegisterHotKey(hwnd, HOTKEY_PRESET_GAMING, MOD_CONTROL | MOD_ALT, '2');
+    RegisterHotKey(hwnd, HOTKEY_PRESET_EVERYTHING, MOD_CONTROL | MOD_ALT, '3');
+
+    if (!RegisterHotKey(hwnd, HOTKEY_CAPTURE, MOD_CONTROL | MOD_ALT, 'B'))
+        log_bi::writeErr(GetLastError(), "hotkey: Ctrl+Alt+B already taken by another app");
+
     bool success = bi_bi->Initialize() && ru_bi->updateRam();
+
+    ru_bi->startSampler(250);
 
     if (!success)
     {
@@ -487,19 +530,164 @@ void win_bi::OnResize(WPARAM wParam)
     }
 }
 
+void win_bi::collectFrames()
+{
+    if (!etwTrace || !ov_bi)
+        return;
+
+    if (frameScratch.size() < 4096)
+        frameScratch.resize(4096);
+
+    size_t taken = 0;
+
+    do
+    {
+        taken = etwTrace->drainFrames(&frameScratch[0], frameScratch.size());
+
+        for (size_t i = 0; i < taken; ++i)
+        {
+            frameStats.push(frameScratch[i].intervalMs, frameScratch[i].time100ns);
+            capture.addFrame(frameScratch[i].intervalMs, frameScratch[i].time100ns);
+        }
+    } while (taken == frameScratch.size());
+
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    LONGLONG now = ((LONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+
+    frameStats.trimToWindow(now, 20.0);
+
+    ov_bi->hud.low1Valid = frameStats.hasEnoughFor(0.01);
+    ov_bi->hud.low01Valid = frameStats.hasEnoughFor(0.001);
+    ov_bi->hud.low1PercentFps = frameStats.lowFps(0.01);
+    ov_bi->hud.low01PercentFps = frameStats.lowFps(0.001);
+}
+
+void win_bi::UpdateDerivedMetrics()
+{
+    if (!ov_bi || !ru_bi || !bi_bi)
+        return;
+
+    hud_bi &hud = ov_bi->hud;
+
+    double fps = hud.metrics[HUD_M_FPS].series.current();
+    bool fpsUsable = hud.metrics[HUD_M_FPS].available && fps > 0.5;
+
+    hud.efficiencyValid = false;
+    if (fpsUsable && snapCpu.packagePowerAvailable && snapCpu.packagePowerW > 0.5)
+    {
+        hud.efficiencyFpsPerWatt = fps / snapCpu.packagePowerW;
+        hud.efficiencyValid = true;
+    }
+
+    hud.bottleneck = hud_bi::BOUND_UNKNOWN;
+    hud.bottleneckRatio = 0.0;
+
+    double frameMs = frameStats.empty() ? 0.0 : frameStats.averageMs();
+
+    if (fpsUsable && haveGpuMs && frameMs > 0.1 && lastGpuMsPerFrame > 0.0)
+    {
+        double ratio = lastGpuMsPerFrame / frameMs;
+        if (ratio > 1.5)
+            ratio = 1.5;
+
+        hud.bottleneckRatio = ratio;
+
+        if (ratio >= 0.95)
+            hud.bottleneck = hud_bi::BOUND_GPU;
+        else if (ratio < 0.70)
+            hud.bottleneck = hud_bi::BOUND_CPU;
+        else
+            hud.bottleneck = hud_bi::BOUND_MIXED;
+    }
+
+    hud.chargerDeficit = false;
+    hud.chargerDeficitW = 0.0;
+
+    if (bi_bi->present && bi_bi->info_1s.onLine && bi_bi->info_1s.discharging &&
+        bi_bi->info_1s.rateValid && bi_bi->info_1s.rateW < -0.5)
+    {
+        hud.chargerDeficit = true;
+        hud.chargerDeficitW = bi_bi->info_1s.rateW;
+    }
+
+    hud.capturing = capture.active();
+    hud.captureSeconds = hud.capturing ? capture.elapsedSeconds() : 0.0;
+    hud.captureFrames = capture.frameCount();
+
+    if (capture.active())
+    {
+        capture.addPowerSample(snapCpu.packagePowerW,
+                               snapCpu.packagePowerAvailable,
+                               bi_bi->info_1s.chargePercent,
+                               bi_bi->present && bi_bi->info_1s.chargeValid,
+                               bi_bi->info_1s.rateW,
+                               bi_bi->present && bi_bi->info_1s.rateValid,
+                               bi_bi->info_static.capacityValid
+                                   ? bi_bi->info_static.fullChargedWh
+                                   : 0.0);
+    }
+}
+
+void win_bi::ToggleCapture()
+{
+    if (capture.active())
+    {
+        capture_bi::summary_bi summary;
+
+        if (capture.stop(&summary))
+        {
+            lastCapture = summary;
+            haveLastCapture = true;
+            captureHistoryLoaded = false;
+        }
+    }
+    else
+    {
+        std::string name = etw_bi::processName(hudTargetPid);
+        capture.start(name);
+    }
+
+    draw_bibi_bi->setTab(draw_batteryinfo_bi::CAPTURE);
+
+    if (ov_bi && ov_bi->show_on_screen_display)
+        UpdateOverlayHud();
+
+    InvalidateRect(hwnd, NULL, TRUE);
+}
+
+draw_batteryinfo_bi::capture_view_bi win_bi::BuildCaptureView()
+{
+    draw_batteryinfo_bi::capture_view_bi view;
+
+    view.recording = capture.active();
+    view.seconds = capture.elapsedSeconds();
+    view.frames = capture.frameCount();
+    view.liveFps = capture.liveAverageFps();
+    view.liveLow1 = capture.liveLow1Fps();
+    view.liveLow1Valid = capture.liveLow1Valid();
+
+    view.hasLast = haveLastCapture;
+    view.last = lastCapture;
+
+    if (!captureHistoryLoaded)
+    {
+        capture_bi::loadIndex(&captureHistory);
+        captureHistoryLoaded = true;
+    }
+
+    view.history = captureHistory;
+    return view;
+}
+
 void win_bi::UpdateOverlayHud()
 {
     if (!ov_bi)
         return;
 
     ++hudTick;
-    bool pdhTick = (hudTick % HUD_PDH_EVERY_N_TICKS) == 0;
 
-    if (pdhTick)
-    {
-        ru_bi->updateHudSample();
-        ru_bi->updateRam();
-    }
+    ru_bi->readSnapshot(&snapCpu, &snapRam, &snapGpu, &snapGpuBusyMs, &snapGpuBusyValid);
 
     HWND foreground = GetForegroundWindow();
     DWORD fgPid = 0;
@@ -535,8 +723,12 @@ void win_bi::UpdateOverlayHud()
         ov_bi->hud.setApi(hudApiName);
     }
 
-    double gpuBusyMs = 0.0;
-    bool gpuTimeOk = pdhTick && ru_bi->updateGpuTime(measuredPid, &gpuBusyMs);
+    ru_bi->setSamplerTarget(measuredPid);
+
+    double gpuBusyMs = snapGpuBusyMs;
+    bool gpuTimeOk = snapGpuBusyValid;
+
+    collectFrames();
 
     if (etwTrace && etwTrace->running())
     {
@@ -557,7 +749,7 @@ void win_bi::UpdateOverlayHud()
 
             if (gpuTimeOk)
             {
-                double window = (double)(HUD_PDH_EVERY_N_TICKS * HUD_SAMPLE_INTERVAL_MS) / 1000.0;
+                double window = (double)ru_bi->samplerInterval() / 1000.0;
                 double framesThisWindow = s.fps * window;
 
                 if (framesThisWindow > 0.01)
@@ -572,16 +764,16 @@ void win_bi::UpdateOverlayHud()
         }
     }
 
-    ov_bi->hud.metrics[HUD_M_CPUW].available = ru_bi->cpuInfo.packagePowerAvailable;
-    if (ru_bi->cpuInfo.packagePowerAvailable)
-        ov_bi->hud.push(HUD_M_CPUW, ru_bi->cpuInfo.packagePowerW);
+    ov_bi->hud.metrics[HUD_M_CPUW].available = snapCpu.packagePowerAvailable;
+    if (snapCpu.packagePowerAvailable)
+        ov_bi->hud.push(HUD_M_CPUW, snapCpu.packagePowerW);
 
-    ov_bi->hud.push(HUD_M_CPU, ru_bi->cpuInfo.UsageValue);
-    ov_bi->hud.push(HUD_M_GPU, ru_bi->gpuInfo.gpuLoadValue);
-    ov_bi->hud.push(HUD_M_RAM, ru_bi->ramInfo.loadValue);
-    ov_bi->hud.push(HUD_M_COMMIT, ru_bi->ramInfo.commitValue);
+    ov_bi->hud.push(HUD_M_CPU, snapCpu.UsageValue);
+    ov_bi->hud.push(HUD_M_GPU, snapGpu.gpuLoadValue);
+    ov_bi->hud.push(HUD_M_RAM, snapRam.loadValue);
+    ov_bi->hud.push(HUD_M_COMMIT, snapRam.commitValue);
 
-    ov_bi->hud.setMemory(ru_bi->ramInfo.usedGB, ru_bi->ramInfo.totalGB);
+    ov_bi->hud.setMemory(snapRam.usedGB, snapRam.totalGB);
 
     ov_bi->hud.metrics[HUD_M_CPU].show = ru_bi->cpuInfo.show_UsagePercent;
     ov_bi->hud.metrics[HUD_M_GPU].show = ru_bi->gpuInfo.show_gpuLoad;
@@ -591,33 +783,40 @@ void win_bi::UpdateOverlayHud()
     ov_bi->hud.showDevice = ru_bi->gpuInfo.show_gpuName;
     ov_bi->hud.showMem = ru_bi->ramInfo.show_ullTotalPhys;
 
+    ov_bi->hud.showVram = ru_bi->gpuInfo.show_vram;
+    ov_bi->hud.vramAvailable = snapGpu.vramAvailable;
+    ov_bi->hud.vramUsedMB = snapGpu.vramUsedMB;
+    ov_bi->hud.vramTotalMB = snapGpu.vramTotalMB;
+
+    UpdateDerivedMetrics();
+
     ov_bi->hud.clearExtraRows();
 
     if (ru_bi->cpuInfo.show_cpuName)
-        ov_bi->hud.addExtraRow(ru_bi->cpuInfo.cpuName);
+        ov_bi->hud.addExtraRow(snapCpu.cpuName);
 
     if (ru_bi->cpuInfo.show_architecture)
-        ov_bi->hud.addExtraRow("Arch: " + ru_bi->cpuInfo.architecture);
+        ov_bi->hud.addExtraRow("Arch: " + snapCpu.architecture);
 
     if (ru_bi->cpuInfo.show_CoreUsagePercents)
     {
-        for (size_t i = 0; i < ru_bi->cpuInfo.CoreUsagePercents.size(); ++i)
+        for (size_t i = 0; i < snapCpu.CoreUsagePercents.size(); ++i)
         {
             ov_bi->hud.addExtraRow("Core " + std::to_string(i + 1) + ": " +
-                                   ru_bi->cpuInfo.CoreUsagePercents[i]);
+                                   snapCpu.CoreUsagePercents[i]);
         }
     }
 
     if (ru_bi->ramInfo.show_ullAvailPhys)
-        ov_bi->hud.addExtraRow("Avail RAM: " + ru_bi->ramInfo.ullAvailPhys);
+        ov_bi->hud.addExtraRow("Avail RAM: " + snapRam.ullAvailPhys);
     if (ru_bi->ramInfo.show_ullAvailPageFile)
-        ov_bi->hud.addExtraRow("Avail Page: " + ru_bi->ramInfo.ullAvailPageFile);
+        ov_bi->hud.addExtraRow("Avail Page: " + snapRam.ullAvailPageFile);
     if (ru_bi->ramInfo.show_ullTotalVirtual)
-        ov_bi->hud.addExtraRow("Total Virt: " + ru_bi->ramInfo.ullTotalVirtual);
+        ov_bi->hud.addExtraRow("Total Virt: " + snapRam.ullTotalVirtual);
     if (ru_bi->ramInfo.show_ullAvailVirtual)
-        ov_bi->hud.addExtraRow("Avail Virt: " + ru_bi->ramInfo.ullAvailVirtual);
+        ov_bi->hud.addExtraRow("Avail Virt: " + snapRam.ullAvailVirtual);
     if (ru_bi->ramInfo.show_ullAvailExtendedVirtual)
-        ov_bi->hud.addExtraRow("Ext Virt: " + ru_bi->ramInfo.ullAvailExtendedVirtual);
+        ov_bi->hud.addExtraRow("Ext Virt: " + snapRam.ullAvailExtendedVirtual);
 
     if (bi_bi->info_1s.Voltage_)
         ov_bi->hud.addExtraRow("Voltage: " + bi_bi->info_1s.Voltage);
@@ -759,6 +958,13 @@ void win_bi::OnLeftButtonDown(WPARAM wParam, LPARAM lParam)
     else if (result.toggledAutostart)
         ru_bi->toggleStartWithWindows();
 
+    if (result.refreshChanged)
+    {
+        KillTimer(hwnd, 3);
+        SetTimer(hwnd, 3, (UINT)ov_bi->refreshMs, NULL);
+        log_bi::write("overlay refresh set to %d ms", ov_bi->refreshMs);
+    }
+
     if (result.needsBrushRebuild)
     {
         ID2D1HwndRenderTarget *pRT = initd2d1_bi->GetOrCreateRenderTarget(hwnd);
@@ -825,6 +1031,18 @@ void win_bi::RunAction(int action)
         break;
     }
 
+    case draw_batteryinfo_bi::ACT_TOGGLE_CAPTURE:
+        ToggleCapture();
+        break;
+
+    case draw_batteryinfo_bi::ACT_OPEN_CAPTURES:
+    {
+        std::string dir = capture_bi::capturesDir();
+        if (!dir.empty())
+            ShellExecuteA(hwnd, "open", dir.c_str(), NULL, NULL, SW_SHOWNORMAL);
+        break;
+    }
+
     case draw_batteryinfo_bi::ACT_CHECK_UPDATE:
         updater->checkAsync(hwnd);
         break;
@@ -869,9 +1087,12 @@ void win_bi::RunAction(int action)
     }
 }
 
-draw_batteryinfo_bi::diag_bi win_bi::BuildDiagnostics() const
+draw_batteryinfo_bi::diag_bi win_bi::BuildDiagnostics()
 {
     draw_batteryinfo_bi::diag_bi diag;
+
+    if (ru_bi)
+        ru_bi->readSnapshot(&snapCpu, &snapRam, &snapGpu, &snapGpuBusyMs, &snapGpuBusyValid);
 
     if (etwTrace)
     {
@@ -891,9 +1112,9 @@ draw_batteryinfo_bi::diag_bi win_bi::BuildDiagnostics() const
 
     if (ru_bi)
     {
-        diag.cpuPower = ru_bi->cpuInfo.packagePowerAvailable;
+        diag.cpuPower = snapCpu.packagePowerAvailable;
         diag.gpuName = ru_bi->gpuInfo.gpuName;
-        diag.threads = (int)ru_bi->cpuInfo.CoreUsagePercents.size();
+        diag.threads = (int)snapCpu.CoreUsagePercents.size();
     }
 
     if (bi_bi)
@@ -932,8 +1153,10 @@ void win_bi::OnTimer(WPARAM wParam)
         break;
 
     case 3:
-        if (ov_bi && ov_bi->show_on_screen_display)
+        if (ov_bi && (ov_bi->show_on_screen_display || capture.active()))
             UpdateOverlayHud();
+        else
+            collectFrames();
         break;
     }
 }
@@ -997,6 +1220,10 @@ void win_bi::OnDestroy()
     KillTimer(hwnd, 2);
     KillTimer(hwnd, 3);
     UnregisterHotKey(hwnd, HOTKEY_TOGGLE_HUD);
+    UnregisterHotKey(hwnd, HOTKEY_PRESET_MINIMAL);
+    UnregisterHotKey(hwnd, HOTKEY_PRESET_GAMING);
+    UnregisterHotKey(hwnd, HOTKEY_PRESET_EVERYTHING);
+    UnregisterHotKey(hwnd, HOTKEY_CAPTURE);
     RemoveTrayIcon();
 
     SaveSettings();
@@ -1012,7 +1239,10 @@ void win_bi::OnDestroy()
         initdwrite_bi->CleanupDirectWrite();
 
     if (ru_bi)
+    {
+        ru_bi->stopSampler();
         ru_bi->cleanup();
+    }
 
     draw_bibi_bi.reset();
     initd2d1_bi.reset();

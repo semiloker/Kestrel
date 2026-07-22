@@ -10,7 +10,7 @@ namespace
 {
     const float TABBAR_H = 56.0f;
     const float PAD = 20.0f;
-    const float CONTENT_MAX = 880.0f;
+    const float CONTENT_MAX = 1040.0f;
     const float CARD_R = 10.0f;
     const float CARD_PAD = 16.0f;
     const float CARD_GAP = 12.0f;
@@ -704,8 +704,9 @@ void draw_batteryinfo_bi::drawTabBar(ID2D1HwndRenderTarget *pRT, init_dwrite_bi 
     logoMark(PAD, 15.0f, 26.0f);
     txt(dw->pTextFormatStrong, PAD + 34.0f, 19.0f, PAD + 110.0f, 37.0f, pal.text, L"Kestrel");
 
-    const wchar_t *labels[TAB_COUNT] = {L"Battery", L"Settings", L"Appearance", L"About"};
-    const float widths[TAB_COUNT] = {48.0f, 53.0f, 74.0f, 40.0f};
+    const wchar_t *labels[TAB_COUNT] = {L"Battery", L"Settings", L"Capture",
+                                        L"Appearance", L"About"};
+    const float widths[TAB_COUNT] = {48.0f, 53.0f, 52.0f, 74.0f, 40.0f};
 
     float x = 132.0f;
     D2D1_COLOR_F active = accentText();
@@ -863,30 +864,46 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
 
     y += 108.0f + CARD_GAP;
 
-    card(L, y, R, y + 190.0f);
+    struct detail_cell
+    {
+        const wchar_t *label;
+        std::wstring value;
+        bool missing;
+    };
+
+    detail_cell details[6] = {
+        {L"CHEMISTRY", widen(bi->info_static.Chemistry), false},
+        {L"POWER STATE", bi->info_1s.onLine ? L"On mains" : L"On battery", false},
+        {L"VOLTAGE",
+         bi->info_1s.voltageValid ? wfmt(L"%.2f V", bi->info_1s.voltageV) : L"\u2014",
+         !bi->info_1s.voltageValid},
+        {L"POWER DRAW",
+         bi->info_1s.rateValid ? wfmt(L"%.2f W", bi->info_1s.rateW) : L"\u2014",
+         !bi->info_1s.rateValid},
+        {L"TIME TO EMPTY", minutesText(bi->info_10s.minutesToEmpty),
+         bi->info_10s.minutesToEmpty < 0},
+        {L"TIME TO FULL", minutesText(bi->info_10s.minutesToFull),
+         bi->info_10s.minutesToFull < 0}};
+
+    int cols = (IW > 660.0f) ? 3 : 2;
+    int detailRows = (6 + cols - 1) / cols;
+
+    float gap = 16.0f;
+    float colW = (IW - gap * (float)(cols - 1)) / (float)cols;
+    float detailH = 41.0f + (float)detailRows * 48.0f - 4.0f;
+
+    card(L, y, R, y + detailH);
     eyebrow(dw, IX, y + 16.0f, L"DETAILS");
 
-    float colW = (IW - 16.0f) * 0.5f;
-    float c2 = IX + colW + 16.0f;
-    float rowY = y + 41.0f;
+    for (int i = 0; i < 6; ++i)
+    {
+        float cx = IX + (float)(i % cols) * (colW + gap);
+        float cy = y + 41.0f + (float)(i / cols) * 48.0f;
 
-    statCell(dw, IX, rowY, colW, L"CHEMISTRY", widen(bi->info_static.Chemistry), false);
-    statCell(dw, c2, rowY, colW, L"POWER STATE",
-             bi->info_1s.onLine ? L"On mains" : L"On battery", false);
+        statCell(dw, cx, cy, colW, details[i].label, details[i].value, details[i].missing);
+    }
 
-    statCell(dw, IX, rowY + 48.0f, colW, L"VOLTAGE",
-             bi->info_1s.voltageValid ? wfmt(L"%.2f V", bi->info_1s.voltageV) : L"\u2014",
-             !bi->info_1s.voltageValid);
-    statCell(dw, c2, rowY + 48.0f, colW, L"POWER DRAW",
-             bi->info_1s.rateValid ? wfmt(L"%.2f W", bi->info_1s.rateW) : L"\u2014",
-             !bi->info_1s.rateValid);
-
-    statCell(dw, IX, rowY + 96.0f, colW, L"TIME TO EMPTY",
-             minutesText(bi->info_10s.minutesToEmpty), bi->info_10s.minutesToEmpty < 0);
-    statCell(dw, c2, rowY + 96.0f, colW, L"TIME TO FULL",
-             minutesText(bi->info_10s.minutesToFull), bi->info_10s.minutesToFull < 0);
-
-    y += 190.0f + CARD_GAP;
+    y += detailH + CARD_GAP;
 
     card(L, y, R, y + 124.0f);
     eyebrow(dw, IX, y + 16.0f, L"ALERTS");
@@ -947,10 +964,15 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         r = {L"GPU milliseconds", &ov->hud.metrics[HUD_M_GPUMS].show,
              &ov->hud.metrics[HUD_M_GPUMS].graphed, MC_GPUMS, frameOk};
         out.push_back(r);
+        r = {L"CPU or GPU bound", &ov->hud.showBottleneck, nullptr, MC_NONE, frameOk};
+        out.push_back(r);
         break;
 
     case GROUP_GPU:
         r = {L"Load", &ru->gpuInfo.show_gpuLoad, &ov->hud.metrics[HUD_M_GPU].graphed, MC_GPU, true};
+        out.push_back(r);
+        r = {L"Video memory", &ru->gpuInfo.show_vram, nullptr, MC_GPU,
+             ru->gpuInfo.vramTotalMB > 0.0};
         out.push_back(r);
         r = {L"Adapter name", &ru->gpuInfo.show_gpuName, nullptr, MC_NONE, true};
         out.push_back(r);
@@ -962,6 +984,9 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         out.push_back(r);
         r = {L"Package power", &ru->cpuInfo.show_packagePower,
              &ov->hud.metrics[HUD_M_CPUW].graphed, MC_POWER, powerOk};
+        out.push_back(r);
+        r = {L"Frames per watt", &ov->hud.showEfficiency, nullptr, MC_POWER,
+             frameOk && powerOk};
         out.push_back(r);
         r = {L"Per-core load", &ru->cpuInfo.show_CoreUsagePercents, nullptr, MC_NONE, true};
         out.push_back(r);
@@ -983,6 +1008,9 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         r = {L"Charge level", &bi->info_1s.ChargeLevel_, nullptr, MC_NONE, bi->present};
         out.push_back(r);
         r = {L"Time remaining", &bi->info_10s.TimeRemaining_, nullptr, MC_NONE, bi->present};
+        out.push_back(r);
+        r = {L"Charger deficit warning", &ov->hud.showChargerDeficit, nullptr, MC_NONE,
+             bi->present};
         out.push_back(r);
         break;
 
@@ -1023,21 +1051,6 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
     return (int)out.size();
 }
 
-int draw_batteryinfo_bi::countEnabled(int group, overlay_bi *ov, resource_usage_bi *ru,
-                                      batteryinfo_bi *bi) const
-{
-    std::vector<row_bi> rows;
-    buildGroupRows(group, ov, ru, bi, rows);
-
-    int on = 0;
-    for (size_t i = 0; i < rows.size(); ++i)
-    {
-        if (rows[i].show && *rows[i].show)
-            ++on;
-    }
-    return on;
-}
-
 void draw_batteryinfo_bi::applyPreset(int preset, overlay_bi *ov, resource_usage_bi *ru,
                                       batteryinfo_bi *bi)
 {
@@ -1059,6 +1072,7 @@ void draw_batteryinfo_bi::applyPreset(int preset, overlay_bi *ov, resource_usage
     }
 
     ov->hud.showDisplay = true;
+    ov->hud.showChargerDeficit = true;
 
     if (preset == 0)
     {
@@ -1069,6 +1083,8 @@ void draw_batteryinfo_bi::applyPreset(int preset, overlay_bi *ov, resource_usage
     else if (preset == 1)
     {
         ov->hud.showLows = true;
+        ov->hud.showBottleneck = true;
+        ov->hud.showEfficiency = true;
         ov->hud.metrics[HUD_M_FPS].show = true;
         ov->hud.metrics[HUD_M_PRE].show = true;
         ov->hud.metrics[HUD_M_PRE].graphed = true;
@@ -1255,7 +1271,7 @@ D2D1_SIZE_F draw_batteryinfo_bi::measureOverlayPanel(overlay_bi *ov) const
 {
     const hud_layout_bi &lay = ov->layout;
 
-    std::vector<hud_element_bi> elements;
+    std::vector<hud_element_bi> &elements = panelScratch;
     ov->hud.buildLayoutInto(elements);
 
     if (elements.empty())
@@ -1315,7 +1331,29 @@ void draw_batteryinfo_bi::drawOverlayPreview(init_dwrite_bi *dw, overlay_bi *ov,
     float panelW = panel.width;
     float panelH = panel.height;
 
+    float scale = 1.0f;
+    if (panelW > (r - l) && panelW > 1.0f)
+        scale = (r - l) / panelW;
+    if (panelH > (b - t) && panelH > 1.0f)
+    {
+        float vertical = (b - t) / panelH;
+        if (vertical < scale)
+            scale = vertical;
+    }
+    if (scale < 0.25f)
+        scale = 0.25f;
+
     rt->PushAxisAlignedClip(D2D1::RectF(l, t, r, b), D2D1_ANTIALIAS_MODE_ALIASED);
+
+    if (scale < 0.999f)
+    {
+        rt->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale, D2D1::Point2F(l, t)));
+        previewScale = scale;
+    }
+    else
+    {
+        previewScale = 1.0f;
+    }
 
     fillRR(l, t, l + panelW, t + panelH, lay.cornerRadius, th.panel);
 
@@ -1394,6 +1432,7 @@ void draw_batteryinfo_bi::drawOverlayPreview(init_dwrite_bi *dw, overlay_bi *ov,
         }
     }
 
+    rt->SetTransform(D2D1::Matrix3x2F::Identity());
     rt->PopAxisAlignedClip();
 }
 
@@ -1432,7 +1471,13 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
 
     txt(dw->pTextFormatLabel, L, y, L + 50.0f, y + 28.0f, pal.faint, L"Preset");
 
-    int currentPreset = detectPreset(ov, ru, bi);
+    if (settingsDirty)
+    {
+        cachedPreset = detectPreset(ov, ru, bi);
+        settingsDirty = false;
+    }
+
+    int currentPreset = cachedPreset;
 
     float px = L + 54.0f;
     for (int i = 0; i < 3; ++i)
@@ -1464,13 +1509,24 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
         px += w + 6.0f;
     }
 
+    int groupTotal[GROUP_COUNT];
+    int groupOn[GROUP_COUNT];
     int totalOn = 0;
     int totalRows = 0;
+
     for (int g = 0; g < GROUP_COUNT; ++g)
     {
-        std::vector<row_bi> rows;
-        totalRows += buildGroupRows(g, ov, ru, bi, rows);
-        totalOn += countEnabled(g, ov, ru, bi);
+        groupTotal[g] = buildGroupRows(g, ov, ru, bi, rowScratch);
+
+        groupOn[g] = 0;
+        for (size_t i = 0; i < rowScratch.size(); ++i)
+        {
+            if (rowScratch[i].show && *rowScratch[i].show)
+                ++groupOn[g];
+        }
+
+        totalRows += groupTotal[g];
+        totalOn += groupOn[g];
     }
 
     txt(dw->pTextFormatMicro, R - 200.0f, y, R, y + 28.0f, pal.faint,
@@ -1506,10 +1562,8 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
         }
         else
         {
-            std::vector<row_bi> rows;
-            int count = buildGroupRows(g, ov, ru, bi, rows);
             txt(dw->pTextFormatMicro, L + 14.0f, ry, L + RAIL_W - 12.0f, ry + RAIL_ITEM_H,
-                pal.faint, wfmt(L"%d/%d", countEnabled(g, ov, ru, bi), count),
+                pal.faint, wfmt(L"%d/%d", groupOn[g], groupTotal[g]),
                 DWRITE_TEXT_ALIGNMENT_TRAILING);
         }
 
@@ -1518,11 +1572,20 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
 
     float railBottom = railTop + GROUP_COUNT * (RAIL_ITEM_H + RAIL_GAP);
 
+    D2D1_SIZE_F panel = measureOverlayPanel(ov);
+
+    float sideColumn = panel.width + CARD_PAD * 2.0f;
+    if (sideColumn < 260.0f)
+        sideColumn = 260.0f;
+
+    bool sidePreview = (R - L) >= (RAIL_W + 16.0f + 320.0f + 16.0f + sideColumn);
+
+    float paneRight = sidePreview ? (R - sideColumn - 16.0f) : R;
     float PX = L + RAIL_W + 16.0f;
 
     txt(dw->pTextFormatStrong, PX, y, PX + 240.0f, y + 20.0f, pal.text,
         GROUP_NAMES[settingsGroup]);
-    txt(dw->pTextFormatLabel, PX, y + 23.0f, R, y + 38.0f, pal.muted,
+    txt(dw->pTextFormatLabel, PX, y + 23.0f, paneRight, y + 38.0f, pal.muted,
         GROUP_DESC[settingsGroup]);
 
     float paneY = y + 49.0f;
@@ -1532,12 +1595,12 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
     if (settingsGroup == GROUP_FRAME && !frameOk)
     {
         float bannerH = 76.0f;
-        fillRR(PX, paneY, R, paneY + bannerH, 8.0f, tint(pal.warn, 0.12f));
-        strokeRR(PX, paneY, R, paneY + bannerH, 8.0f, pal.warn, 1.0f);
+        fillRR(PX, paneY, paneRight, paneY + bannerH, 8.0f, tint(pal.warn, 0.12f));
+        strokeRR(PX, paneY, paneRight, paneY + bannerH, 8.0f, pal.warn, 1.0f);
 
-        txt(dw->pTextFormatSmall, PX + 14.0f, paneY + 10.0f, R - 14.0f, paneY + 28.0f,
+        txt(dw->pTextFormatSmall, PX + 14.0f, paneY + 10.0f, paneRight - 14.0f, paneY + 28.0f,
             pal.warn, L"Frame timing needs administrator rights");
-        txt(dw->pTextFormatLabel, PX + 14.0f, paneY + 30.0f, R - 14.0f, paneY + 46.0f,
+        txt(dw->pTextFormatLabel, PX + 14.0f, paneY + 30.0f, paneRight - 14.0f, paneY + 46.0f,
             pal.muted, L"ETW session creation is refused for standard users.");
 
         fillRR(PX + 14.0f, paneY + 50.0f, PX + 146.0f, paneY + 66.0f + 14.0f, BTN_R, pal.warn);
@@ -1554,20 +1617,20 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
     }
     else if (groupDimmed)
     {
-        fillRR(PX, paneY, R, paneY + 40.0f, 8.0f, pal.inset);
-        txt(dw->pTextFormatLabel, PX + 14.0f, paneY, R - 14.0f, paneY + 40.0f, pal.muted,
+        fillRR(PX, paneY, paneRight, paneY + 40.0f, 8.0f, pal.inset);
+        txt(dw->pTextFormatLabel, PX + 14.0f, paneY, paneRight - 14.0f, paneY + 40.0f, pal.muted,
             L"The overlay is off. These rows still save \u2014 nothing is drawn.");
         paneY += 40.0f + CARD_GAP;
     }
 
-    std::vector<row_bi> rows;
+    std::vector<row_bi> &rows = rowScratch;
     int rowCount = buildGroupRows(settingsGroup, ov, ru, bi, rows);
 
     bool useToggles = (settingsGroup == GROUP_BEHAVIOR);
     float rowHeight = useToggles ? ROW_H : METRIC_ROW_H;
     float cardH = rowCount * rowHeight + 16.0f;
 
-    card(PX, paneY, R, paneY + cardH);
+    card(PX, paneY, paneRight, paneY + cardH);
 
     for (int i = 0; i < rowCount; ++i)
     {
@@ -1579,10 +1642,10 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
                       isHovered(HIT_GRAPH_CHIP, i);
 
         if (rowHot)
-            hoverFill(PX + 1.0f, ry + 1.0f, R - 1.0f, ry + rowHeight - 1.0f, 4.0f);
+            hoverFill(PX + 1.0f, ry + 1.0f, paneRight - 1.0f, ry + rowHeight - 1.0f, 4.0f);
 
         if (i > 0)
-            line(PX + 14.0f, ry, R - 14.0f, ry, pal.border, 1.0f);
+            line(PX + 14.0f, ry, paneRight - 14.0f, ry, pal.border, 1.0f);
 
         float labelX = PX + 14.0f;
 
@@ -1593,19 +1656,19 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
             labelX = PX + 28.0f;
         }
 
-        txt(dw->pTextFormatValue, labelX, ry, R - 140.0f, ry + rowHeight,
+        txt(dw->pTextFormatValue, labelX, ry, paneRight - 140.0f, ry + rowHeight,
             dimmed ? pal.disabled : pal.text, row.label);
 
         if (useToggles)
         {
-            float tx = R - 14.0f - TOGGLE_W;
+            float tx = paneRight - 14.0f - TOGGLE_W;
             toggle(tx, ry + (rowHeight - TOGGLE_H) * 0.5f, *row.show, dimmed);
-            pushHit(D2D1::RectF(PX, ry, R, ry + rowHeight), HIT_TOGGLE, i, row.show);
+            pushHit(D2D1::RectF(PX, ry, paneRight, ry + rowHeight), HIT_TOGGLE, i, row.show);
         }
         else
         {
             float chipY = ry + (rowHeight - CHIP_H) * 0.5f;
-            float rowChipX = R - 14.0f - CHIP_ROW_W;
+            float rowChipX = paneRight - 14.0f - CHIP_ROW_W;
 
             chip(dw, rowChipX, chipY, CHIP_ROW_W, L"Row", *row.show, dimmed);
             if (isHovered(HIT_ROW_CHIP, i))
@@ -1629,30 +1692,223 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
 
     if (settingsGroup == GROUP_CPU && !ru->cpuInfo.packagePowerAvailable)
     {
-        txt(dw->pTextFormatMicro, PX, paneBottom + 8.0f, R, paneBottom + 23.0f, pal.faint,
+        txt(dw->pTextFormatMicro, PX, paneBottom + 8.0f, paneRight, paneBottom + 23.0f, pal.faint,
             L"Package power counter is not present on this machine.");
         paneBottom += 23.0f;
     }
 
     float bottom = (paneBottom > railBottom) ? paneBottom : railBottom;
-    y = bottom + CARD_GAP + 8.0f;
 
-    D2D1_SIZE_F panel = measureOverlayPanel(ov);
+    float previewLeft = sidePreview ? (R - sideColumn) : L;
+    float previewRight = R;
+    float previewTop = sidePreview ? railTop : (bottom + CARD_GAP + 8.0f);
 
-    float previewH = panel.height + 52.0f;
+    float boxW = previewRight - previewLeft - CARD_PAD * 2.0f;
+
+    float availableH = sidePreview
+                           ? (viewHeight - previewTop - PAD - 52.0f)
+                           : (viewHeight - TABBAR_H - 120.0f);
+    if (availableH < 140.0f)
+        availableH = 140.0f;
+
+    float fit = 1.0f;
+    if (panel.width > boxW && panel.width > 1.0f)
+        fit = boxW / panel.width;
+    if (panel.height > availableH && panel.height > 1.0f)
+    {
+        float vertical = availableH / panel.height;
+        if (vertical < fit)
+            fit = vertical;
+    }
+    if (fit < 0.25f)
+        fit = 0.25f;
+
+    float previewH = panel.height * fit + 52.0f;
     if (previewH < 120.0f)
         previewH = 120.0f;
-    if (previewH > 420.0f)
-        previewH = 420.0f;
 
-    card(L, y, R, y + previewH);
-    eyebrow(dw, L + CARD_PAD, y + 16.0f, L"OVERLAY PREVIEW \u00B7 ACTUAL SIZE");
-    drawOverlayPreview(dw, ov, ru, L + CARD_PAD, y + 36.0f, R - CARD_PAD, y + previewH - 16.0f);
+    card(previewLeft, previewTop, previewRight, previewTop + previewH);
 
-    y += previewH + PAD;
+    eyebrow(dw, previewLeft + CARD_PAD, previewTop + 16.0f,
+            fit < 0.999f ? wfmt(L"PREVIEW \u00B7 %.0f%% OF ACTUAL SIZE", fit * 100.0)
+                         : std::wstring(L"PREVIEW \u00B7 ACTUAL SIZE"));
+
+    drawOverlayPreview(dw, ov, ru, previewLeft + CARD_PAD, previewTop + 36.0f,
+                       previewRight - CARD_PAD, previewTop + previewH - 16.0f);
+
+    float previewBottom = previewTop + previewH;
+    y = (previewBottom > bottom ? previewBottom : bottom) + PAD;
 
     contentHeight = y + scrollOffsetY;
     clampScroll();
+    drawScrollbar();
+}
+
+void draw_batteryinfo_bi::drawCaptureTab(ID2D1HwndRenderTarget *pRT, init_dwrite_bi *dw,
+                                         const capture_view_bi &cap)
+{
+    beginFrame(pRT);
+
+    float L = contentLeft();
+    float R = contentRight();
+    float IX = L + CARD_PAD;
+    float IR = R - CARD_PAD;
+    float IW = IR - IX;
+    float shift = -scrollOffsetY;
+
+    float y = TABBAR_H + PAD + shift;
+
+    card(L, y, R, y + 128.0f);
+    eyebrow(dw, IX, y + 16.0f, L"SESSION");
+
+    if (cap.recording)
+    {
+        int mins = (int)(cap.seconds / 60.0);
+        int secs = (int)cap.seconds % 60;
+
+        fillEl(IX + 5.0f, y + 47.0f, 5.0f, pal.bad);
+        txt(dw->pTextFormatDisplay, IX + 18.0f, y + 26.0f, IX + 200.0f, y + 68.0f, pal.text,
+            wfmt(L"%d:%02d", mins, secs));
+
+        txt(dw->pTextFormatSmall, IR - 260.0f, y + 32.0f, IR, y + 50.0f, pal.muted,
+            wfmt(L"%u frames", (unsigned)cap.frames), DWRITE_TEXT_ALIGNMENT_TRAILING);
+        txt(dw->pTextFormatSmall, IR - 260.0f, y + 50.0f, IR, y + 68.0f, pal.muted,
+            cap.liveLow1Valid
+                ? wfmt(L"%.0f fps avg \u00B7 %.0f low", cap.liveFps, cap.liveLow1)
+                : wfmt(L"%.0f fps avg", cap.liveFps),
+            DWRITE_TEXT_ALIGNMENT_TRAILING);
+
+        button(dw, IX, y + 80.0f, 160.0f, L"Stop and save", true,
+               isHovered(HIT_ACTION, ACT_TOGGLE_CAPTURE));
+    }
+    else
+    {
+        txt(dw->pTextFormatStrong, IX, y + 32.0f, IR, y + 52.0f, pal.text,
+            L"Record a run and measure it");
+        txt(dw->pTextFormatSmall, IX, y + 54.0f, IR, y + 72.0f, pal.muted,
+            L"Frame times, package power and what the run cost the battery.");
+
+        button(dw, IX, y + 80.0f, 160.0f, L"Start recording", true,
+               isHovered(HIT_ACTION, ACT_TOGGLE_CAPTURE));
+    }
+
+    pushHit(D2D1::RectF(IX, y + 80.0f, IX + 160.0f, y + 80.0f + BTN_H),
+            HIT_ACTION, ACT_TOGGLE_CAPTURE, nullptr);
+
+    txt(dw->pTextFormatMicro, IX + 172.0f, y + 80.0f, IR, y + 112.0f, pal.faint,
+        L"or press Ctrl+Alt+B anywhere");
+
+    y += 128.0f + CARD_GAP;
+
+    if (cap.hasLast)
+    {
+        const capture_bi::summary_bi &s = cap.last;
+
+        card(L, y, R, y + 232.0f);
+        eyebrow(dw, IX, y + 16.0f, L"LAST RUN");
+
+        txt(dw->pTextFormatSmall, IR - 300.0f, y + 14.0f, IR, y + 30.0f, pal.muted,
+            widen(s.process) + wfmt(L" \u00B7 %.0f s \u00B7 %u frames",
+                                    s.seconds, (unsigned)s.frames),
+            DWRITE_TEXT_ALIGNMENT_TRAILING);
+
+        float colW = (IW - 32.0f) / 3.0f;
+        float c1 = IX;
+        float c2 = IX + colW + 16.0f;
+        float c3 = IX + (colW + 16.0f) * 2.0f;
+        float rowY = y + 44.0f;
+
+        statCell(dw, c1, rowY, colW, L"AVERAGE", wfmt(L"%.1f fps", s.avgFps), false);
+        statCell(dw, c2, rowY, colW, L"1% LOW",
+                 s.low1Valid ? wfmt(L"%.1f fps", s.low1Fps) : L"\u2014", !s.low1Valid);
+        statCell(dw, c3, rowY, colW, L"0.1% LOW",
+                 s.low01Valid ? wfmt(L"%.1f fps", s.low01Fps) : L"\u2014", !s.low01Valid);
+
+        rowY += 52.0f;
+
+        statCell(dw, c1, rowY, colW, L"MEDIAN FRAME", wfmt(L"%.2f ms", s.medianMs), false);
+        statCell(dw, c2, rowY, colW, L"WORST FRAME", wfmt(L"%.1f ms", s.maxMs), false);
+        statCell(dw, c3, rowY, colW, L"STUTTERS", wfmt(L"%u", s.stutters), false);
+
+        rowY += 52.0f;
+
+        statCell(dw, c1, rowY, colW, L"CPU PACKAGE",
+                 s.packageValid ? wfmt(L"%.1f W", s.avgPackageW) : L"\u2014", !s.packageValid);
+        statCell(dw, c2, rowY, colW, L"ENERGY USED",
+                 s.energyValid ? wfmt(L"%.2f Wh", s.energyWh) : L"\u2014", !s.energyValid);
+        statCell(dw, c3, rowY, colW, L"BATTERY LIFE",
+                 s.projectionValid ? wfmt(L"%.1f h", s.projectedHours) : L"\u2014",
+                 !s.projectionValid);
+
+        rowY += 46.0f;
+
+        if (s.efficiencyValid)
+        {
+            txt(dw->pTextFormatMicro, IX, rowY, IR, rowY + 15.0f, pal.faint,
+                wfmt(L"%.0f frames per watt-hour", s.framesPerWattHour));
+        }
+        else
+        {
+            txt(dw->pTextFormatMicro, IX, rowY, IR, rowY + 15.0f, pal.faint,
+                L"Package power was not readable, so energy could not be measured.");
+        }
+
+        y += 232.0f + CARD_GAP;
+    }
+
+    float roomForHistory = viewHeight - y - FOOTER_H - BTN_H - PAD * 2.0f;
+    size_t maxRows = (roomForHistory > 98.0f) ? (size_t)((roomForHistory - 64.0f) / 34.0f) : 1;
+    if (maxRows < 1)
+        maxRows = 1;
+    if (maxRows > 24)
+        maxRows = 24;
+
+    size_t historyRows = cap.history.size() < maxRows ? cap.history.size() : maxRows;
+
+    float historyH = 64.0f + (float)historyRows * 34.0f;
+
+    card(L, y, R, y + historyH);
+    eyebrow(dw, IX, y + 16.0f, L"SAVED RUNS");
+
+    if (cap.history.empty())
+    {
+        txt(dw->pTextFormatSmall, IX, y + 34.0f, IR, y + 52.0f, pal.faint,
+            L"Nothing recorded yet.");
+    }
+    else
+    {
+        for (size_t i = 0; i < historyRows; ++i)
+        {
+            const capture_bi::summary_bi &h = cap.history[i];
+            float ry = y + 34.0f + i * 34.0f;
+
+            if (i > 0)
+                line(IX, ry, IR, ry, pal.border, 1.0f);
+
+            txt(dw->pTextFormatLabel, IX, ry + 6.0f, IX + 130.0f, ry + 26.0f, pal.muted,
+                widen(h.label));
+            txt(dw->pTextFormatValue, IX + 138.0f, ry + 5.0f, IX + 300.0f, ry + 27.0f,
+                pal.text, widen(h.process));
+            txt(dw->pTextFormatLabel, IR - 200.0f, ry + 6.0f, IR, ry + 26.0f, pal.muted,
+                h.energyValid
+                    ? wfmt(L"%.0f fps \u00B7 %.2f Wh", h.avgFps, h.energyWh)
+                    : wfmt(L"%.0f fps", h.avgFps),
+                DWRITE_TEXT_ALIGNMENT_TRAILING);
+        }
+    }
+
+    y += historyH + CARD_GAP;
+
+    button(dw, L, y, 150.0f, L"Open captures folder", false,
+           isHovered(HIT_ACTION, ACT_OPEN_CAPTURES));
+    pushHit(D2D1::RectF(L, y, L + 150.0f, y + BTN_H), HIT_ACTION, ACT_OPEN_CAPTURES, nullptr);
+
+    y += BTN_H + PAD;
+
+    contentHeight = y + scrollOffsetY + FOOTER_H;
+    clampScroll();
+
+    drawFooter(dw, L"Frame times are written as CSV, one row per frame.");
     drawScrollbar();
 }
 
@@ -1794,7 +2050,47 @@ void draw_batteryinfo_bi::drawAppearanceTab(ID2D1HwndRenderTarget *pRT, init_dwr
 
     y += 145.0f + CARD_GAP;
 
-    card(L, y, R, y + 72.0f);
+    card(L, y, R, y + 130.0f);
+    txt(dw->pTextFormatValue, IX, y + 16.0f, IX + 300.0f, y + 34.0f, pal.text,
+        L"Refresh rate");
+    txt(dw->pTextFormatMicro, IX, y + 36.0f, IX + 340.0f, y + 51.0f, pal.faint,
+        L"Slower redraws cost less while playing");
+
+    const int RATES[4] = {50, 100, 250, 500};
+    float rateX = IR - 4.0f * 52.0f - 3.0f * 6.0f;
+
+    for (int i = 0; i < 4; ++i)
+    {
+        float bx = rateX + i * 58.0f;
+        bool on = (ov && ov->refreshMs == RATES[i]);
+        bool hot = isHovered(HIT_REFRESH, i);
+
+        if (on)
+        {
+            fillRR(bx, y + 21.0f, bx + 52.0f, y + 51.0f, BTN_R, accentColor);
+            txt(dw->pTextFormatMicro, bx, y + 21.0f, bx + 52.0f, y + 51.0f,
+                D2D1::ColorF(0xFFFFFF), wfmt(L"%d ms", RATES[i]),
+                DWRITE_TEXT_ALIGNMENT_CENTER);
+        }
+        else
+        {
+            if (hot)
+                hoverFill(bx, y + 21.0f, bx + 52.0f, y + 51.0f, BTN_R);
+
+            strokeRR(bx, y + 21.0f, bx + 52.0f, y + 51.0f, BTN_R,
+                     hot ? pal.faint : pal.border, 1.0f);
+            txt(dw->pTextFormatMicro, bx, y + 21.0f, bx + 52.0f, y + 51.0f, pal.text,
+                wfmt(L"%d ms", RATES[i]), DWRITE_TEXT_ALIGNMENT_CENTER);
+        }
+
+        pushHit(D2D1::RectF(bx, y + 21.0f, bx + 52.0f, y + 51.0f), HIT_REFRESH,
+                RATES[i], nullptr);
+    }
+
+    line(IX, y + 66.0f, IR, y + 66.0f, pal.border, 1.0f);
+
+    y += 58.0f;
+
     txt(dw->pTextFormatValue, IX, y + 16.0f, IX + 300.0f, y + 34.0f, pal.text,
         L"Overlay margin");
     txt(dw->pTextFormatMicro, IX, y + 36.0f, IX + 320.0f, y + 51.0f, pal.faint,
@@ -2114,6 +2410,15 @@ draw_batteryinfo_bi::click_result_bi draw_batteryinfo_bi::handleClick(POINT curs
             }
             break;
 
+        case HIT_REFRESH:
+            if (ov && h.index >= 30 && h.index <= 2000)
+            {
+                ov->refreshMs = h.index;
+                result.needsSave = true;
+                result.refreshChanged = true;
+            }
+            break;
+
         case HIT_MARGIN:
             if (ov)
             {
@@ -2136,6 +2441,9 @@ draw_batteryinfo_bi::click_result_bi draw_batteryinfo_bi::handleClick(POINT curs
             result.handled = false;
             break;
         }
+
+        if (result.needsSave)
+            settingsDirty = true;
 
         if (result.handled)
             return result;

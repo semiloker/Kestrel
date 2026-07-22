@@ -43,8 +43,26 @@ Kestrel sits between the two on purpose:
 - **Honest about missing data.** When a value cannot be measured, Kestrel shows a
   dash. It never prints a plausible-looking zero in place of a number it does not
   have, and it writes the reason to a log you can read.
-- **Small footprint.** The overlay redraws at 10 Hz and samples performance
-  counters at 5 Hz through a single shared PDH query.
+- **Small footprint.** The overlay redraw rate is yours to pick, and performance
+  counters are sampled on a background thread so neither the window nor the
+  overlay ever waits on them.
+- **Built for laptops.** Kestrel is the only one of these tools that knows what
+  a frame costs you: frames per watt, and a warning when your charger cannot
+  keep up with the load.
+
+### What Kestrel deliberately will not do
+
+RTSS and MSI Afterburner hook into the game's own present chain to draw inside
+it and to cap the frame rate. That means injecting a DLL into the game process.
+Kestrel does not do this, and will not:
+
+- anti-cheat systems treat injection as an attack, and users get banned for it
+- it contradicts the whole point of a portable executable with no installer
+
+The cost of that choice is honest: **there is no frame limiter, and the overlay
+cannot draw over exclusive-fullscreen games.** Most modern titles run borderless
+or flip-model, where the overlay works fine. If you need a frame cap, use RTSS
+alongside Kestrel.
 
 ---
 
@@ -59,12 +77,19 @@ Kestrel sits between the two on purpose:
 - Rolling graphs holding 24 seconds of history, grouped by unit so milliseconds,
   percentages, memory and watts each get an independently scaled plot
 - Per-metric visibility and per-metric graph toggles
-- Global hotkey `Ctrl+Alt+H` to show and hide
+- Redraw rate of 50, 100, 250 or 500 ms
+- Global hotkeys: `Ctrl+Alt+H` to show and hide, `Ctrl+Alt+1/2/3` to switch
+  preset, `Ctrl+Alt+B` to start and stop a recording
 
 ### Frame timing
 
 - Frames per second and frame interval in milliseconds
-- 1% low and 0.1% low, the numbers that describe stutter which an average hides
+- **1% low and 0.1% low computed from individual frame intervals**, not from
+  averaged samples. `1% low = 1000 / P99(frame time)`, the same definition
+  MangoHud and CapFrameX use, so the numbers are comparable between tools.
+  Each figure stays a dash until enough frames exist to mean anything: 100
+  frames for the 1% low, 1000 for the 0.1%
+- **CPU or GPU bound**, from per-frame GPU time against frame interval
 - Real per-frame GPU time, measured from the graphics kernel scheduler rather
   than derived from a utilisation percentage
 - Graphics API detection: D3D9, D3D11, D3D12, OpenGL, Vulkan
@@ -75,7 +100,10 @@ Kestrel sits between the two on purpose:
 
 - CPU total and per-core utilisation
 - CPU package power in watts, read from hardware RAPL counters
+- **Frames per watt**, the number that tells you whether raising the power limit
+  actually bought you anything
 - GPU utilisation and per-process GPU time
+- **Video memory in use against the adapter's capacity**
 - Physical memory and commit charge
 - Display resolution, render scale, refresh rate and composition state
 
@@ -83,8 +111,26 @@ Kestrel sits between the two on purpose:
 
 - Charge level, voltage, current rate and remaining capacity
 - Estimated time to empty and time to full
-- Charge cycle count
+- Charge cycle count and wear against the design capacity
 - Designed and full-charge capacity, chemistry, manufacturer
+- **Charger deficit warning** — plugged in and still draining, because the load
+  exceeds what the power supply delivers
+
+### Recording a run
+
+- `Ctrl+Alt+B` starts and stops a capture, with a `REC` row in the overlay so
+  you always know it is running. The overlay does not have to be visible
+- Summary per run: average, 1% low, 0.1% low, median and worst frame, stutter
+  count, average package power, **energy spent in watt-hours**, and the battery
+  life that load implies
+- One CSV row per frame in `%APPDATA%\Kestrel\captures\`, plus an `index.csv`
+  of every run, both readable by Excel or a script
+
+### Updating
+
+- Checks GitHub for a newer release only when you ask it to, never on its own
+- Installs in place and keeps the previous build as `kestrel.old.exe`, with a
+  roll-back button if the new one misbehaves
 
 ### Application
 

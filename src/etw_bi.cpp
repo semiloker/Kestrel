@@ -79,11 +79,16 @@ etw_bi::etw_bi()
       censusRuns(0),
       lastHealth100ns(0),
       lastEventsLost(0),
-      lastBuffersLost(0)
+      lastBuffersLost(0),
+      frameWritten(0),
+      frameDrained(0),
+      frameLost(0),
+      frameOwnerPid(0)
 {
     InitializeCriticalSection(&lock);
 
     memset(sources, 0, sizeof(sources));
+    memset(frameRing, 0, sizeof(frameRing));
 
     int n = 0;
 
@@ -385,13 +390,61 @@ void etw_bi::onPresent(DWORD pid, int sourceIndex, LONGLONG timestamp100ns)
 
     if (s.lastPresent100ns != 0 && timestamp100ns > s.lastPresent100ns)
     {
-        s.intervalSum100ns += timestamp100ns - s.lastPresent100ns;
+        LONGLONG delta = timestamp100ns - s.lastPresent100ns;
+
+        s.intervalSum100ns += delta;
         ++s.intervalCount;
+
+        if (pid == targetPid && sourceIndex == reportedSource)
+        {
+            if (frameOwnerPid != pid)
+            {
+                frameOwnerPid = pid;
+                frameWritten = 0;
+                frameDrained = 0;
+                frameLost = 0;
+            }
+
+            frame_sample_bi &slot = frameRing[frameWritten % ETW_FRAME_RING];
+            slot.time100ns = timestamp100ns;
+            slot.intervalMs = (float)((double)delta / 10000.0);
+
+            ++frameWritten;
+        }
     }
 
     s.lastPresent100ns = timestamp100ns;
 
     LeaveCriticalSection(&lock);
+}
+
+size_t etw_bi::drainFrames(frame_sample_bi *out, size_t max)
+{
+    if (!out || max == 0)
+        return 0;
+
+    EnterCriticalSection(&lock);
+
+    if (frameWritten > ETW_FRAME_RING)
+    {
+        unsigned long long oldest = frameWritten - ETW_FRAME_RING;
+        if (frameDrained < oldest)
+        {
+            frameLost += oldest - frameDrained;
+            frameDrained = oldest;
+        }
+    }
+
+    unsigned long long available = frameWritten - frameDrained;
+    size_t taken = (available < (unsigned long long)max) ? (size_t)available : max;
+
+    for (size_t i = 0; i < taken; ++i)
+        out[i] = frameRing[(frameDrained + i) % ETW_FRAME_RING];
+
+    frameDrained += taken;
+
+    LeaveCriticalSection(&lock);
+    return taken;
 }
 
 DWORD WINAPI etw_bi::traceThread(LPVOID param)

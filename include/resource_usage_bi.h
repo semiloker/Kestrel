@@ -13,6 +13,8 @@
 #include <iphlpapi.h>
 #include <comdef.h>
 #include <Wbemidl.h>
+#include <dxgi.h>
+#include <dxgi1_2.h>
 
 #include "autostart_bi.h"
 
@@ -29,6 +31,20 @@ public:
 
         start_As_Admin = isStartAsAdminEnabled();
         start_With_Windows = isStartWithWindowsEnabled();
+
+        InitializeCriticalSection(&publishLock);
+        publishLockReady = true;
+    }
+
+    ~resource_usage_bi()
+    {
+        stopSampler();
+
+        if (publishLockReady)
+        {
+            DeleteCriticalSection(&publishLock);
+            publishLockReady = false;
+        }
     }
 
     bool isStartWithWindowsEnabled();
@@ -120,8 +136,13 @@ public:
 
         double gpuLoadValue = 0.0;
 
+        double vramUsedMB = 0.0;
+        double vramTotalMB = 0.0;
+        bool vramAvailable = false;
+
         bool show_gpuName = true;
         bool show_gpuLoad = true;
+        bool show_vram = false;
     };
 
     CpuInfo cpuInfo;
@@ -142,6 +163,7 @@ public:
     void initGpuInfo();
 
     bool updateGpuTime(DWORD pid, double *busyMsOut);
+    bool updateGpuMemory();
     bool updateCpuPower();
     bool updateDisk();
     bool updateNetwork();
@@ -167,12 +189,40 @@ public:
         bool success = true;
         success &= updateCpu();
         updateCpuPower();
+        updateGpuMemory();
         return success;
     }
 
     void cleanup();
 
+    void startSampler(int intervalMs);
+    void stopSampler();
+    void setSamplerInterval(int intervalMs);
+    void setSamplerTarget(DWORD pid);
+    int samplerInterval() const { return (int)samplerIntervalMs; }
+
+    void readSnapshot(CpuInfo *cpu, RamInfo *ram, GpuInfo *gpu,
+                      double *gpuBusyMs, bool *gpuBusyValid);
+
 private:
+    static DWORD WINAPI samplerEntry(LPVOID param);
+    void samplerLoop();
+    void publishSample(double gpuBusyMs, bool gpuBusyValid);
+
+    CRITICAL_SECTION publishLock;
+    bool publishLockReady = false;
+
+    CpuInfo pubCpu;
+    RamInfo pubRam;
+    GpuInfo pubGpu;
+    double pubGpuBusyMs = 0.0;
+    bool pubGpuBusyValid = false;
+
+    HANDLE samplerThread = NULL;
+    HANDLE samplerStop = NULL;
+    volatile LONG samplerIntervalMs = 200;
+    volatile LONG samplerTargetPid = 0;
+
     bool openSharedQuery();
     bool collectShared();
 
@@ -193,8 +243,12 @@ private:
     bool powerLogged = false;
     int powerAttempts = 0;
 
+    PDH_HCOUNTER vramCounter = NULL;
+    bool vramLogged = false;
+
     std::vector<BYTE> gpuBuffer;
     std::vector<BYTE> powerBuffer;
+    std::vector<BYTE> vramBuffer;
 
     std::map<std::wstring, ULONGLONG> gpuTimePrev;
 

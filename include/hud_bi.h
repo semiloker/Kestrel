@@ -129,6 +129,41 @@ public:
 
     bool showLows = true;
 
+    double low1PercentFps = 0.0;
+    double low01PercentFps = 0.0;
+    bool low1Valid = false;
+    bool low01Valid = false;
+
+    enum bound_bi
+    {
+        BOUND_UNKNOWN = 0,
+        BOUND_CPU,
+        BOUND_GPU,
+        BOUND_MIXED
+    };
+
+    bool showEfficiency = false;
+    bool showBottleneck = false;
+    bool showChargerDeficit = true;
+
+    double efficiencyFpsPerWatt = 0.0;
+    bool efficiencyValid = false;
+
+    bound_bi bottleneck = BOUND_UNKNOWN;
+    double bottleneckRatio = 0.0;
+
+    double chargerDeficitW = 0.0;
+    bool chargerDeficit = false;
+
+    bool capturing = false;
+    double captureSeconds = 0.0;
+    size_t captureFrames = 0;
+
+    bool showVram = false;
+    bool vramAvailable = false;
+    double vramUsedMB = 0.0;
+    double vramTotalMB = 0.0;
+
     void initStaticInfo(const std::string &adapterName);
 
     void updateForeground(HWND foreground);

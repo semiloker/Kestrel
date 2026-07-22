@@ -82,6 +82,7 @@ public:
 
     corner_bi corner = CORNER_TOP_RIGHT;
     int margin = 20;
+    int refreshMs = HUD_SAMPLE_INTERVAL_MS;
 
     hud_bi hud;
     hud_layout_bi layout;

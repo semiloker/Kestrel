@@ -47,6 +47,10 @@ user profile at `%APPDATA%\Kestrel\`:
 - **`kestrel.log`** — a diagnostic log. It may record hardware identifiers such
   as your CPU model, GPU adapter name, and battery chemistry, together with
   error messages. It exists so that you can see why a value could not be read.
+- **`captures\`** — created only when you record a session. Each run writes a
+  CSV of frame times plus an `index.csv` summarising the runs. These files
+  contain performance measurements and the name of the program you recorded.
+  Nothing is uploaded; delete the folder at any time.
 
 Both files stay on your computer. Neither is transmitted anywhere. You may
 delete either file at any time; deleting `settings.ini` resets Kestrel to its
