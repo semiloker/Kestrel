@@ -1570,7 +1570,7 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
         pushHit(D2D1::RectF(L, ry, L + RAIL_W, ry + RAIL_ITEM_H), HIT_RAIL, g, nullptr);
     }
 
-    float railBottom = railTop + GROUP_COUNT * (RAIL_ITEM_H + RAIL_GAP);
+    float railBottom = railTop + (float)GROUP_COUNT * (RAIL_ITEM_H + RAIL_GAP);
 
     D2D1_SIZE_F panel = measureOverlayPanel(ov);
 
