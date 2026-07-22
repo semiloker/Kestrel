@@ -363,11 +363,23 @@ static double clampField(double value, int decimals)
     return value;
 }
 
+static void formatFixed(char *buf, size_t n, double value, int decimals)
+{
+    double v = clampField(value, decimals);
+
+    if (decimals <= 0)
+        snprintf(buf, n, "%.0f", v);
+    else if (decimals == 1)
+        snprintf(buf, n, "%.1f", v);
+    else
+        snprintf(buf, n, "%.2f", v);
+}
+
 static void fmtLeftNum(char *buf, size_t n, const char *label, double value,
                        int decimals, const char *unit)
 {
-    char text[24];
-    snprintf(text, sizeof(text), "%.*f", decimals, clampField(value, decimals));
+    char text[64];
+    formatFixed(text, sizeof(text), value, decimals);
     fmtLeft(buf, n, label, text, unit);
 }
 
@@ -383,8 +395,8 @@ static void fmtRightPhrase(char *buf, size_t n, const char *phrase)
 
 static void fmtRightTotalPct(char *buf, size_t n, double total, int decimals, double percent)
 {
-    char text[24];
-    snprintf(text, sizeof(text), "%.*f", decimals, clampField(total, decimals));
+    char text[64];
+    formatFixed(text, sizeof(text), total, decimals);
 
     if (percent > 999.0)
         percent = 999.0;
