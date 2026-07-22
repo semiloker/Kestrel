@@ -1,3 +1,7 @@
 .vscode/
 bin/
 obj/
+dist/
+build-assets/
+*.o
+*.d

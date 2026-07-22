@@ -1,0 +1,45 @@
+name: Unrecognised frame source
+description: A game shows dashes instead of frame rate, and the log contains an event census
+labels: [frame-source]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Kestrel recognises the common present events of DXGI, D3D9 and the
+        DirectX graphics kernel. When a game uses a path outside that list, it
+        writes an event census to `%APPDATA%\Kestrel\kestrel.log`. Paste that
+        table here and the event will be recognised for everyone.
+
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      placeholder: Factorio 2.0.28, Steam
+    validations:
+      required: true
+
+  - type: input
+    id: api
+    attributes:
+      label: Graphics API the game is using
+      placeholder: Vulkan
+    validations:
+      required: true
+
+  - type: input
+    id: reported-fps
+    attributes:
+      label: Frame rate the game itself reports
+      description: From the in-game counter, while the census was running
+      placeholder: 60
+    validations:
+      required: true
+
+  - type: textarea
+    id: census
+    attributes:
+      label: Census table from the log
+      description: Every line starting with "etw census" and the indented rows below it
+      render: text
+    validations:
+      required: true

@@ -1,4 +1,4 @@
-#include "../include/BatteryInfo.h"
+#include "BatteryInfo.h"
 
 bool batteryinfo_bi::Initialize()
 {
@@ -37,7 +37,7 @@ bool batteryinfo_bi::Initialize()
     if (hBattery == INVALID_HANDLE_VALUE)
         return false;
 
-    return QueryTag() && QueryBatteryInfo() && QueryBatteryStatus() && QueryBatteryRemaining() /*&& QueryRamInfo() && QueryCpuInfo()*/ && QueryBatteryCycleCount();
+    return QueryTag() && QueryBatteryInfo() && QueryBatteryStatus() && QueryBatteryRemaining()  && QueryBatteryCycleCount();
 }
 
 bool batteryinfo_bi::QueryTag()
@@ -161,7 +161,6 @@ bool batteryinfo_bi::QueryBatteryCycleCount()
         info_static.CycleCount = "No data";
     }
 
-    // Cleanup
     pEnumerator->Release();
     pSvc->Release();
     pLoc->Release();
@@ -181,7 +180,6 @@ bool batteryinfo_bi::QueryBatteryInfo()
                          &bqi, sizeof(bqi), &bi, sizeof(bi), &bytesReturned, NULL))
         return false;
 
-    // writing to struct
     info_static.Chemistry = std::string((char *)bi.Chemistry, 4);
     info_static.DesignedCapacity = std::to_string(bi.DesignedCapacity) + " mWh (" +
                                    std::to_string(bi.DesignedCapacity / 1000.0) + " mW)";
@@ -215,28 +213,25 @@ bool batteryinfo_bi::QueryBatteryStatus()
                          &bws, sizeof(bws), &bs, sizeof(bs), &bytesReturned, NULL))
         return false;
 
-    double voltage = bs.Voltage / 1000.0;
-    std::ostringstream voltageStream;
-    voltageStream << bs.Voltage << " mV (" << std::fixed << std::setprecision(3) << voltage << " V)";
-    info_1s.Voltage = voltageStream.str();
+    char buf[64];
 
-    double rate = bs.Rate / 1000.0;
-    std::ostringstream rateStream;
-    rateStream << bs.Rate << " mW (" << std::fixed << std::setprecision(3) << rate << " W)";
-    info_1s.Rate = rateStream.str();
+    snprintf(buf, sizeof(buf), "%.2f V", bs.Voltage / 1000.0);
+    info_1s.Voltage = buf;
+
+    snprintf(buf, sizeof(buf), "%.2f W", (double)(LONG)bs.Rate / 1000.0);
+    info_1s.Rate = buf;
 
     info_1s.PowerState =
         (bs.PowerState & BATTERY_CHARGING) ? "Charging" : (bs.PowerState & BATTERY_DISCHARGING) ? "Discharging"
                                                                                                 : "Idle";
 
-    std::ostringstream capacityStream;
-    capacityStream << bs.Capacity << " mWh (" << std::fixed << std::setprecision(3) << bs.Capacity / 1000.0 << " Wh)";
-    info_1s.RemainingCapacity = capacityStream.str();
+    snprintf(buf, sizeof(buf), "%.2f Wh", bs.Capacity / 1000.0);
+    info_1s.RemainingCapacity = buf;
 
     if (bi.FullChargedCapacity > 0)
     {
-        double percent = (bs.Capacity * 100.0) / bi.FullChargedCapacity;
-        info_1s.ChargeLevel = std::to_string(percent) + "%";
+        snprintf(buf, sizeof(buf), "%.2f%%", (bs.Capacity * 100.0) / bi.FullChargedCapacity);
+        info_1s.ChargeLevel = buf;
     }
 
     return true;
@@ -246,16 +241,17 @@ bool batteryinfo_bi::QueryBatteryRemaining()
 {
     if (bi.FullChargedCapacity > 0)
     {
+        char buf[64];
+
         if ((bs.PowerState & BATTERY_DISCHARGING) && bs.Rate != 0)
         {
-            int rate_mW = abs(bs.Rate); // +
+            int rate_mW = abs(bs.Rate);
             if (rate_mW > 0)
             {
                 int remainingMinutes = (bs.Capacity * 60) / rate_mW;
-                int hours = remainingMinutes / 60;
-                int minutes = remainingMinutes % 60;
-                info_10s.TimeRemaining = std::to_string(hours) + "h. " + std::to_string(minutes) + "m. (" +
-                                         std::to_string(remainingMinutes) + " min, based on Capacity / Rate)";
+                snprintf(buf, sizeof(buf), "%dh. %dm.",
+                         remainingMinutes / 60, remainingMinutes % 60);
+                info_10s.TimeRemaining = buf;
             }
             else
             {
@@ -269,17 +265,14 @@ bool batteryinfo_bi::QueryBatteryRemaining()
 
         if ((bs.PowerState & BATTERY_CHARGING) && bs.Rate != 0)
         {
-            int rate_mW = abs(bs.Rate); // +
+            int rate_mW = abs(bs.Rate);
             int remainingCapacity = bi.FullChargedCapacity - bs.Capacity;
             if (rate_mW > 0)
             {
                 int timeToFullMinutes = (remainingCapacity * 60) / rate_mW;
-                int fullChargeHours = timeToFullMinutes / 60;
-                int fullChargeMinutes = timeToFullMinutes % 60;
-
-                info_10s.TimeToFullCharge = std::to_string(fullChargeHours) + "h. " +
-                                            std::to_string(fullChargeMinutes) + "m. (" +
-                                            std::to_string(timeToFullMinutes) + " min, based on (FullChargedCapacity - Capacity) / Rate)";
+                snprintf(buf, sizeof(buf), "%dh. %dm.",
+                         timeToFullMinutes / 60, timeToFullMinutes % 60);
+                info_10s.TimeToFullCharge = buf;
             }
             else
             {
@@ -295,77 +288,6 @@ bool batteryinfo_bi::QueryBatteryRemaining()
     return true;
 }
 
-// bool batteryinfo_bi::QueryRamInfo()
-// {
-//     MEMORYSTATUSEX statex = { sizeof(statex) };
-
-//     if (GlobalMemoryStatusEx(&statex)) {
-//         DWORDLONG total = statex.ullTotalPhys;
-//         DWORDLONG avail = statex.ullAvailPhys;
-//         DWORDLONG used = total - avail;
-//         DWORD usagePercent = statex.dwMemoryLoad;
-
-//         ramInfo.TotalPhys = std::to_string(total / (1024 * 1024)) + " MB";
-//         ramInfo.AvailPhys = std::to_string(avail / (1024 * 1024)) + " MB";
-//         ramInfo.UsedPercent = std::to_string(usagePercent) + "%";
-//         return true;
-//     }
-//     return false;
-// }
-
-// bool batteryinfo_bi::QueryCpuInfo()
-// {
-//     FILETIME idleTime, kernelTime, userTime;
-//     if (!GetSystemTimes(&idleTime, &kernelTime, &userTime))
-//         return false;
-
-//     ULARGE_INTEGER idle, kernel, user, prevIdle, prevKernel, prevUser;
-//     idle.LowPart = idleTime.dwLowDateTime;
-//     idle.HighPart = idleTime.dwHighDateTime;
-
-//     kernel.LowPart = kernelTime.dwLowDateTime;
-//     kernel.HighPart = kernelTime.dwHighDateTime;
-
-//     user.LowPart = userTime.dwLowDateTime;
-//     user.HighPart = userTime.dwHighDateTime;
-
-//     prevIdle.LowPart = prevIdleTime.dwLowDateTime;
-//     prevIdle.HighPart = prevIdleTime.dwHighDateTime;
-
-//     prevKernel.LowPart = prevKernelTime.dwLowDateTime;
-//     prevKernel.HighPart = prevKernelTime.dwHighDateTime;
-
-//     prevUser.LowPart = prevUserTime.dwLowDateTime;
-//     prevUser.HighPart = prevUserTime.dwHighDateTime;
-
-//     ULONGLONG sysTime = (kernel.QuadPart - prevKernel.QuadPart) + (user.QuadPart - prevUser.QuadPart);
-//     ULONGLONG idleDiff = idle.QuadPart - prevIdle.QuadPart;
-
-//     if (sysTime == 0)
-//         return false;
-
-//     int cpuUsage = static_cast<int>(100.0 * (sysTime - idleDiff) / sysTime);
-//     cpuInfo.UsagePercent = std::to_string(cpuUsage) + "%";
-
-//     // збереження нових значень
-//     prevIdleTime = idleTime;
-//     prevKernelTime = kernelTime;
-//     prevUserTime = userTime;
-
-//     return true;
-// }
-
 void batteryinfo_bi::PrintAllConsole() const
 {
-    // std::cout << "Chemistry: " << info.Chemistry << "\n"
-    //           << "Designed Capacity: " << info.DesignedCapacity << "\n"
-    //           << "Full Charged Capacity: " << info.FullChargedCapacity << "\n"
-    //           << "Default Alert1: " << info.DefaultAlert1 << "\n"
-    //           << "Default Alert2: " << info.DefaultAlert2 << "\n"
-    //           << "Wear Level: " << info.WearLevel << "\n"
-    //           << "Voltage: " << info.Voltage << "\n"
-    //           << "Rate: " << info.Rate << "\n"
-    //           << "Power State: " << info.PowerState << "\n"
-    //           << "Remaining Capacity: " << info.RemainingCapacity << "\n"
-    //           << "Charge Level: " << info.ChargeLevel << "\n";
 }

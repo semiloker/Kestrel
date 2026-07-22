@@ -1,11 +1,40 @@
-#include "../include/main.h"
+#include "main.h"
+#include "resource_bi.h"
+#include "autostart_bi.h"
+#include "logger_bi.h"
+#include "paths_bi.h"
+#include "dpi_bi.h"
+#include "app_identity_bi.h"
 
-const char win_bi::szClassName[] = "BatteryInfo";
+#include <cstring>
 
-win_bi::win_bi(HINSTANCE hInstance) : hInstance(hInstance), hwnd(NULL) {}
+const char win_bi::szClassName[] = APP_WINDOW_CLASS;
+
+#define HOTKEY_TOGGLE_HUD 1
+
+#define WINDOW_DIP_W 550
+#define WINDOW_DIP_H 750
+
+win_bi::win_bi(HINSTANCE hInstance) : hInstance(hInstance), hwnd(NULL)
+{
+    ZeroMemory(&nid, sizeof(nid));
+}
 
 bool win_bi::Register()
 {
+    hAppIcon = (HICON)LoadImageA(hInstance, MAKEINTRESOURCEA(IDI_APPICON),
+                                 IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
+    hAppIconSmall = (HICON)LoadImageA(hInstance, MAKEINTRESOURCEA(IDI_APPICON),
+                                      IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+
+    if (!hAppIcon)
+    {
+        log_bi::writeErr(GetLastError(), "icon: LoadImage from resources failed");
+        hAppIcon = LoadIcon(NULL, IDI_APPLICATION);
+    }
+    if (!hAppIconSmall)
+        hAppIconSmall = hAppIcon;
+
     WNDCLASSEX wc = {};
     wc.cbSize = sizeof(WNDCLASSEX);
     wc.style = 0;
@@ -13,13 +42,8 @@ bool win_bi::Register()
     wc.cbClsExtra = 0;
     wc.cbWndExtra = 0;
     wc.hInstance = hInstance;
-    // wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-    // wc.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
-    wc.hIcon = (HICON)LoadImageA(NULL, "sign-of-battery-icon-vector.ico", IMAGE_ICON, 32, 32, LR_LOADFROMFILE);
-    wc.hIconSm = (HICON)LoadImageA(NULL, "sign-of-battery-icon-vector.ico", IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
-    if (!wc.hIcon)
-        MessageBoxA(NULL, "Failed to load icon!", "Error", MB_ICONERROR);
-
+    wc.hIcon = hAppIcon;
+    wc.hIconSm = hAppIconSmall;
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wc.lpszMenuName = NULL;
@@ -30,18 +54,44 @@ bool win_bi::Register()
 
 bool win_bi::Create(int nCmdShow)
 {
+    bi_bi.reset(new batteryinfo_bi());
+    initd2d1_bi.reset(new init_d2d1_bi());
+    initdwrite_bi.reset(new init_dwrite_bi());
+    draw_bibi_bi.reset(new draw_batteryinfo_bi());
+    ru_bi.reset(new resource_usage_bi());
+    ov_bi.reset(new overlay_bi());
+
+    ov_bi->margin = initdwrite_bi->overlay_pos_x;
+    ov_bi->hud.initStaticInfo(ru_bi->gpuInfo.gpuName);
+
+    settings.load();
+    settings.applyTo(ru_bi.get(), ov_bi.get(), draw_bibi_bi.get(), bi_bi.get());
+
+    etwTrace.reset(new etw_bi());
+
+    int fbProv = settings.getInt("etw.fallbackProvider", -1);
+    int fbId = settings.getInt("etw.fallbackEventId", 0);
+    if (fbProv >= 0 && fbProv < etw_bi::PROV_COUNT && fbId > 0)
+        etwTrace->setFallbackSource((etw_bi::provider_bi)fbProv, (unsigned)fbId);
+
+    etwTrace->setDeepCensus(settings.getBool("etw.deepCensus", false));
+
+    etwTrace->start();
+
+    bool frameDataOk = etwTrace->running();
+    ov_bi->hud.metrics[HUD_M_FPS].available = frameDataOk;
+    ov_bi->hud.metrics[HUD_M_PRE].available = frameDataOk;
+    ov_bi->hud.metrics[HUD_M_GPUMS].available = frameDataOk;
+
+    if (!frameDataOk)
+        log_bi::write("frame metrics disabled: %s", etwTrace->lastError());
+
+    float scale = (float)dpi_bi::forSystem() / 96.0f;
+    int windowWidth = (int)(WINDOW_DIP_W * scale + 0.5f);
+    int windowHeight = (int)(WINDOW_DIP_H * scale + 0.5f);
+
     int screenWidth = GetSystemMetrics(SM_CXSCREEN);
     int screenHeight = GetSystemMetrics(SM_CYSCREEN);
-
-    bi_bi = new batteryinfo_bi();
-    initd2d1_bi = new init_d2d1_bi();
-    initdwrite_bi = new init_dwrite_bi();
-    draw_bibi_bi = new draw_batteryinfo_bi();
-    ru_bi = new resource_usage_bi();
-    ov_bi = new overlay_bi(NULL, NULL, {initdwrite_bi->overlay_pos_x, initdwrite_bi->overlay_pos_y, screenWidth, screenHeight}, "nullptr");
-
-    int windowWidth = 550;
-    int windowHeight = 750;
     int x = (screenWidth - windowWidth) / 2;
     int y = (screenHeight - windowHeight) / 2;
 
@@ -52,6 +102,7 @@ bool win_bi::Create(int nCmdShow)
 
     if (!hwnd)
     {
+        log_bi::writeErr(GetLastError(), "CreateWindowEx failed");
         MessageBox(NULL, "Could not create a window!", "Error", MB_ICONEXCLAMATION | MB_OK);
         return false;
     }
@@ -93,6 +144,11 @@ LRESULT CALLBACK win_bi::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         return DefWindowProc(hwnd, msg, wParam, lParam);
     }
 
+    if (pThis->destroyed && msg != WM_DESTROY)
+    {
+        return DefWindowProc(hwnd, msg, wParam, lParam);
+    }
+
     switch (msg)
     {
     case WM_COMMAND:
@@ -109,6 +165,12 @@ LRESULT CALLBACK win_bi::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         break;
     case WM_PAINT:
         pThis->OnPaint(hwnd);
+        break;
+    case WM_DPICHANGED:
+        pThis->OnDpiChanged(wParam, lParam);
+        break;
+    case WM_HOTKEY:
+        pThis->OnHotKey(wParam);
         break;
     case WM_KEYDOWN:
         pThis->OnKeyDown(wParam);
@@ -173,11 +235,6 @@ LRESULT CALLBACK win_bi::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
 void win_bi::OnPaint(HWND hwnd)
 {
-    // PAINTSTRUCT ps;
-    // HDC hdc = BeginPaint(hwnd, &ps);
-    // bi_bi->PrintAllWin(hdc);
-    // EndPaint(hwnd, &ps);
-
     PAINTSTRUCT ps;
     BeginPaint(hwnd, &ps);
 
@@ -186,66 +243,120 @@ void win_bi::OnPaint(HWND hwnd)
     if (pRenderTarget)
     {
         pRenderTarget->BeginDraw();
-        // pRenderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
 
         draw_bibi_bi->initBrush(pRenderTarget);
-        // bi_bi->PrintAllWinD2D(pRenderTarget, 20, 30);
         initdwrite_bi->InitGraph();
         draw_bibi_bi->clearBackground(pRenderTarget);
 
         if (draw_bibi_bi->selectedTab == draw_batteryinfo_bi::BATTERY_INFO)
         {
-            draw_bibi_bi->drawHeaderBatteryInfoD2D(pRenderTarget, bi_bi, initdwrite_bi, 20, 30, 24);
+            draw_bibi_bi->drawHeaderBatteryInfoD2D(pRenderTarget, bi_bi.get(),
+                                                   initdwrite_bi.get(), 20, 30, 24);
         }
         else if (draw_bibi_bi->selectedTab == draw_batteryinfo_bi::SETTINGS)
         {
-            draw_bibi_bi->drawHeaderSettingsD2D(pRenderTarget, initdwrite_bi, ov_bi, ru_bi, bi_bi);
+            draw_bibi_bi->drawHeaderSettingsD2D(pRenderTarget, initdwrite_bi.get(),
+                                                ov_bi.get(), ru_bi.get(), bi_bi.get());
         }
         else if (draw_bibi_bi->selectedTab == draw_batteryinfo_bi::ABOUT_ME)
         {
-            draw_bibi_bi->drawHeaderAboutMeD2D(pRenderTarget, initdwrite_bi, ov_bi, ru_bi, bi_bi);
+            draw_bibi_bi->drawHeaderAboutMeD2D(pRenderTarget, initdwrite_bi.get(),
+                                               ov_bi.get(), ru_bi.get(), bi_bi.get());
         }
         else if (draw_bibi_bi->selectedTab == draw_batteryinfo_bi::APPEARANCE)
         {
-            draw_bibi_bi->drawHeaderAppearanceD2D(pRenderTarget, initdwrite_bi);
+            draw_bibi_bi->drawHeaderAppearanceD2D(pRenderTarget, initdwrite_bi.get(), ov_bi.get());
         }
 
-        draw_bibi_bi->drawHeaders(pRenderTarget, initdwrite_bi);
+        draw_bibi_bi->drawHeaders(pRenderTarget, initdwrite_bi.get());
 
-        if (ov_bi->show_on_screen_display == true)
-            ov_bi->CreateOverlayWindow(hInstance, hwnd);
-        if (ov_bi->show_on_screen_display == false)
-            ov_bi->DestroyOverlayWindow();
+        if (ov_bi)
+        {
+            if (ov_bi->show_on_screen_display)
+                ov_bi->CreateOverlayWindow(hInstance, hwnd);
+            else
+                ov_bi->DestroyOverlayWindow();
+        }
 
         HRESULT hr = pRenderTarget->EndDraw();
         if (FAILED(hr) || hr == D2DERR_RECREATE_TARGET)
         {
             initd2d1_bi->DiscardRenderTarget();
         }
-        // pRenderTarget->EndDraw();
-        // pRenderTarget->Release();
     }
     EndPaint(hwnd, &ps);
-    // ValidateRect(hwnd, nullptr);
+}
+
+void win_bi::OnDpiChanged(WPARAM wParam, LPARAM lParam)
+{
+    RECT *suggested = (RECT *)lParam;
+    if (suggested)
+    {
+        SetWindowPos(hwnd, NULL,
+                     suggested->left, suggested->top,
+                     suggested->right - suggested->left,
+                     suggested->bottom - suggested->top,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
+    initd2d1_bi->UpdateDpi(hwnd);
+    InvalidateRect(hwnd, NULL, TRUE);
+
+    log_bi::write("dpi changed to %u", (unsigned)HIWORD(wParam));
+}
+
+void win_bi::OnHotKey(WPARAM wParam)
+{
+    if (wParam == HOTKEY_TOGGLE_HUD)
+        ToggleOverlay();
+}
+
+void win_bi::ToggleOverlay()
+{
+    if (!ov_bi)
+        return;
+
+    ov_bi->show_on_screen_display = !ov_bi->show_on_screen_display;
+
+    if (ov_bi->show_on_screen_display)
+    {
+        ov_bi->CreateOverlayWindow(hInstance, hwnd);
+        UpdateOverlayHud();
+    }
+    else
+    {
+        ov_bi->DestroyOverlayWindow();
+    }
+
+    InvalidateRect(hwnd, NULL, TRUE);
 }
 
 void win_bi::AddTrayIcon()
 {
+    if (trayIconVisible)
+        return;
+
     ZeroMemory(&nid, sizeof(NOTIFYICONDATA));
     nid.cbSize = sizeof(NOTIFYICONDATA);
     nid.hWnd = hwnd;
     nid.uID = 1;
     nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     nid.uCallbackMessage = WM_USER + 1;
-    nid.hIcon = (HICON)LoadImageA(NULL, "sign-of-battery-icon-vector.ico", IMAGE_ICON, 32, 32, LR_LOADFROMFILE);
+    nid.hIcon = hAppIcon;
 
-    Shell_NotifyIcon(NIM_ADD, &nid);
+    if (Shell_NotifyIcon(NIM_ADD, &nid))
+        trayIconVisible = true;
+    else
+        log_bi::writeErr(GetLastError(), "tray: Shell_NotifyIcon(NIM_ADD) failed");
 
     UpdateTrayTooltip();
 }
 
 void win_bi::UpdateTrayTooltip()
 {
+    if (!trayIconVisible || !bi_bi)
+        return;
+
     std::string tooltip =
         "Power State: " + bi_bi->info_1s.PowerState + "\n" +
         "Charge: " + bi_bi->info_1s.ChargeLevel + "\n" +
@@ -258,7 +369,11 @@ void win_bi::UpdateTrayTooltip()
 
 void win_bi::RemoveTrayIcon()
 {
+    if (!trayIconVisible)
+        return;
+
     Shell_NotifyIcon(NIM_DELETE, &nid);
+    trayIconVisible = false;
 }
 
 void win_bi::ShowTrayMenu()
@@ -270,13 +385,17 @@ void win_bi::ShowTrayMenu()
     if (hMenu)
     {
         InsertMenu(hMenu, -1, MF_BYPOSITION | MF_STRING, 1, "Open");
+        InsertMenu(hMenu, -1, MF_BYPOSITION | MF_STRING, 3,
+                   ov_bi && ov_bi->show_on_screen_display ? "Hide overlay\tCtrl+Alt+H"
+                                                          : "Show overlay\tCtrl+Alt+H");
         InsertMenu(hMenu, -1, MF_BYPOSITION | MF_SEPARATOR, 0, NULL);
         InsertMenu(hMenu, -1, MF_BYPOSITION | MF_STRING, 2, "Exit");
 
         SetForegroundWindow(hwnd);
         SendMessage(hwnd, WM_NULL, 0, 0);
 
-        int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_BOTTOMALIGN | TPM_LEFTALIGN, pt.x, pt.y, 0, hwnd, NULL);
+        int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_BOTTOMALIGN | TPM_LEFTALIGN,
+                                 pt.x, pt.y, 0, hwnd, NULL);
         DestroyMenu(hMenu);
 
         switch (cmd)
@@ -287,7 +406,10 @@ void win_bi::ShowTrayMenu()
             RemoveTrayIcon();
             break;
         case 2:
-            PostQuitMessage(0);
+            DestroyWindow(hwnd);
+            break;
+        case 3:
+            ToggleOverlay();
             break;
         }
     }
@@ -295,15 +417,25 @@ void win_bi::ShowTrayMenu()
 
 void win_bi::OnCreate(HWND hwnd)
 {
+    this->hwnd = hwnd;
+
     SetTimer(hwnd, 1, 1000, NULL);
     SetTimer(hwnd, 2, 10000, NULL);
+
+    SetTimer(hwnd, 3, HUD_SAMPLE_INTERVAL_MS, NULL);
+
+    if (!RegisterHotKey(hwnd, HOTKEY_TOGGLE_HUD, MOD_CONTROL | MOD_ALT, 'H'))
+        log_bi::writeErr(GetLastError(), "hotkey: Ctrl+Alt+H already taken by another app");
 
     bool success = bi_bi->Initialize() && ru_bi->updateRam();
 
     if (!success)
+    {
+        log_bi::write("battery initialization failed (no battery, or driver refused IOCTL)");
         MessageBoxA(NULL, "Battery initialization failed!", "Error", MB_ICONERROR);
+    }
 
-    UpdateOverlayText();
+    UpdateOverlayHud();
 }
 
 void win_bi::OnCommand(WPARAM wParam)
@@ -325,116 +457,158 @@ void win_bi::OnResize(WPARAM wParam)
     }
 }
 
-void win_bi::UpdateOverlayText()
+void win_bi::UpdateOverlayHud()
 {
-    if (ov_bi)
+    if (!ov_bi)
+        return;
+
+    ++hudTick;
+    bool pdhTick = (hudTick % HUD_PDH_EVERY_N_TICKS) == 0;
+
+    if (pdhTick)
     {
-        ru_bi->updateAll();
-
-        std::string newText;
-
-        // CPU Info
-        if (ru_bi->cpuInfo.show_cpuName)
-            newText += "CPU Name: " + ru_bi->cpuInfo.cpuName + "\n";
-
-        if (ru_bi->cpuInfo.show_architecture)
-            newText += "Architecture: " + ru_bi->cpuInfo.architecture + "\n";
-
-        if (ru_bi->cpuInfo.show_UsagePercent)
-            newText += "\nCPU Usage: " + ru_bi->cpuInfo.UsagePercent + "\n";
-
-        if (ru_bi->cpuInfo.show_CoreUsagePercents)
-        {
-            for (size_t i = 0; i < ru_bi->cpuInfo.CoreUsagePercents.size(); ++i)
-            {
-                newText += "Core " + std::to_string(i + 1) + ": " +
-                           ru_bi->cpuInfo.CoreUsagePercents[i] + "\n";
-            }
-        }
-
-        // RAM Info
-        if (ru_bi->ramInfo.show_dwMemoryLoad)
-            newText += "\nMemory Load: " + ru_bi->ramInfo.dwMemoryLoad + "\n";
-
-        if (ru_bi->ramInfo.show_ullTotalPhys)
-            newText += "Total RAM: " + ru_bi->ramInfo.ullTotalPhys + "\n";
-
-        if (ru_bi->ramInfo.show_ullAvailPhys)
-            newText += "Available RAM: " + ru_bi->ramInfo.ullAvailPhys + "\n";
-
-        if (ru_bi->ramInfo.show_ullTotalPageFile)
-            newText += "Total Pagefile: " + ru_bi->ramInfo.ullTotalPageFile + "\n";
-
-        if (ru_bi->ramInfo.show_ullAvailPageFile)
-            newText += "Available Pagefile: " + ru_bi->ramInfo.ullAvailPageFile + "\n";
-
-        if (ru_bi->ramInfo.show_ullTotalVirtual)
-            newText += "Total Virtual: " + ru_bi->ramInfo.ullTotalVirtual + "\n";
-
-        if (ru_bi->ramInfo.show_ullAvailVirtual)
-            newText += "Available Virtual: " + ru_bi->ramInfo.ullAvailVirtual + "\n";
-
-        if (ru_bi->ramInfo.show_ullAvailExtendedVirtual)
-            newText += "Extended Virtual: " + ru_bi->ramInfo.ullAvailExtendedVirtual + "\n";
-
-        if (bi_bi->info_1s.Voltage_)
-            newText += "Voltage: " + bi_bi->info_1s.Voltage + "\n";
-        if (bi_bi->info_1s.Rate_)
-            newText += "Rate: " + bi_bi->info_1s.Rate + "\n";
-        if (bi_bi->info_1s.PowerState_)
-            newText += "Power State: " + bi_bi->info_1s.PowerState + "\n";
-        if (bi_bi->info_1s.RemainingCapacity_)
-            newText += "Remaining Capacity: " + bi_bi->info_1s.RemainingCapacity + "\n";
-        if (bi_bi->info_1s.ChargeLevel_)
-            newText += "Charge Level: " + bi_bi->info_1s.ChargeLevel + "\n";
-        if (bi_bi->info_10s.TimeRemaining_)
-            newText += "Time Remaining: " + bi_bi->info_10s.TimeRemaining + "\n";
-
-        // Disk Info
-        for (const auto &disk : ru_bi->disksInfo)
-        {
-            if (disk.show_diskLetter)
-                newText += "\nDrive: " + disk.diskLetter + "\n";
-
-            if (disk.show_totalSpace)
-                newText += "Total Space: " + disk.totalSpace + "\n";
-
-            if (disk.show_freeSpace)
-                newText += "Free Space: " + disk.freeSpace + "\n";
-
-            if (disk.show_usedSpace)
-                newText += "Used Space: " + disk.usedSpace + "\n";
-
-            if (disk.show_usagePercent)
-                newText += "Usage: " + disk.usagePercent + "\n";
-        }
-
-        // Network Info
-        // for (const auto& net : ru_bi->networkInfo)
-        // {
-        //     if (net.show_interfaceName)
-        //         newText += "\nInterface: " + net.interfaceName + "\n";
-
-        //     if (net.show_downloadSpeed)
-        //         newText += "Download: " + net.downloadSpeed + "\n";
-
-        //     if (net.show_uploadSpeed)
-        //         newText += "Upload: " + net.uploadSpeed + "\n";
-        // }
-
-        ov_bi->UpdateText(newText);
-        ov_bi->UpdatePosition();
-
-        InvalidateRect(ov_bi->g_hwnd, NULL, TRUE);
+        ru_bi->updateHudSample();
+        ru_bi->updateRam();
     }
+
+    HWND foreground = GetForegroundWindow();
+    DWORD fgPid = 0;
+    if (foreground)
+        GetWindowThreadProcessId(foreground, &fgPid);
+
+    if (fgPid != 0 && fgPid != GetCurrentProcessId())
+    {
+        hudTargetPid = fgPid;
+        ov_bi->hud.updateForeground(foreground);
+    }
+
+    etw_bi::sample_bi s;
+
+    if (etwTrace)
+    {
+        etwTrace->setTarget(hudTargetPid);
+
+        if (etwTrace->running())
+            s = etwTrace->sample();
+    }
+
+    DWORD measuredPid = (s.valid && s.pid != 0) ? s.pid : hudTargetPid;
+
+    if (etwTrace)
+    {
+        if (measuredPid != hudApiPid)
+        {
+            hudApiPid = measuredPid;
+            hudApiName = etw_bi::apiName(etw_bi::detectApi(measuredPid));
+        }
+
+        ov_bi->hud.setApi(hudApiName);
+    }
+
+    double gpuBusyMs = 0.0;
+    bool gpuTimeOk = pdhTick && ru_bi->updateGpuTime(measuredPid, &gpuBusyMs);
+
+    if (etwTrace && etwTrace->running())
+    {
+        if (s.valid)
+            lastFrameDataTick = GetTickCount();
+
+        bool frameDataFresh = (lastFrameDataTick != 0) &&
+                              ((GetTickCount() - lastFrameDataTick) < 5000);
+
+        ov_bi->hud.metrics[HUD_M_FPS].available = frameDataFresh;
+        ov_bi->hud.metrics[HUD_M_PRE].available = frameDataFresh;
+        ov_bi->hud.metrics[HUD_M_GPUMS].available = frameDataFresh;
+
+        if (s.valid)
+        {
+            ov_bi->hud.push(HUD_M_FPS, s.fps);
+            ov_bi->hud.push(HUD_M_PRE, s.frameIntervalMs);
+
+            if (gpuTimeOk)
+            {
+                double window = (double)(HUD_PDH_EVERY_N_TICKS * HUD_SAMPLE_INTERVAL_MS) / 1000.0;
+                double framesThisWindow = s.fps * window;
+
+                if (framesThisWindow > 0.01)
+                {
+                    lastGpuMsPerFrame = gpuBusyMs / framesThisWindow;
+                    haveGpuMs = true;
+                }
+            }
+
+            if (haveGpuMs)
+                ov_bi->hud.push(HUD_M_GPUMS, lastGpuMsPerFrame);
+        }
+    }
+
+    ov_bi->hud.metrics[HUD_M_CPUW].available = ru_bi->cpuInfo.packagePowerAvailable;
+    if (ru_bi->cpuInfo.packagePowerAvailable)
+        ov_bi->hud.push(HUD_M_CPUW, ru_bi->cpuInfo.packagePowerW);
+
+    ov_bi->hud.push(HUD_M_CPU, ru_bi->cpuInfo.UsageValue);
+    ov_bi->hud.push(HUD_M_GPU, ru_bi->gpuInfo.gpuLoadValue);
+    ov_bi->hud.push(HUD_M_RAM, ru_bi->ramInfo.loadValue);
+    ov_bi->hud.push(HUD_M_COMMIT, ru_bi->ramInfo.commitValue);
+
+    ov_bi->hud.setMemory(ru_bi->ramInfo.usedGB, ru_bi->ramInfo.totalGB);
+
+    ov_bi->hud.metrics[HUD_M_CPU].show = ru_bi->cpuInfo.show_UsagePercent;
+    ov_bi->hud.metrics[HUD_M_GPU].show = ru_bi->gpuInfo.show_gpuLoad;
+    ov_bi->hud.metrics[HUD_M_RAM].show = ru_bi->ramInfo.show_dwMemoryLoad;
+    ov_bi->hud.metrics[HUD_M_COMMIT].show = ru_bi->ramInfo.show_ullTotalPageFile;
+    ov_bi->hud.metrics[HUD_M_CPUW].show = ru_bi->cpuInfo.show_packagePower;
+    ov_bi->hud.showDevice = ru_bi->gpuInfo.show_gpuName;
+    ov_bi->hud.showMem = ru_bi->ramInfo.show_ullTotalPhys;
+
+    ov_bi->hud.clearExtraRows();
+
+    if (ru_bi->cpuInfo.show_cpuName)
+        ov_bi->hud.addExtraRow(ru_bi->cpuInfo.cpuName);
+
+    if (ru_bi->cpuInfo.show_architecture)
+        ov_bi->hud.addExtraRow("Arch: " + ru_bi->cpuInfo.architecture);
+
+    if (ru_bi->cpuInfo.show_CoreUsagePercents)
+    {
+        for (size_t i = 0; i < ru_bi->cpuInfo.CoreUsagePercents.size(); ++i)
+        {
+            ov_bi->hud.addExtraRow("Core " + std::to_string(i + 1) + ": " +
+                                   ru_bi->cpuInfo.CoreUsagePercents[i]);
+        }
+    }
+
+    if (ru_bi->ramInfo.show_ullAvailPhys)
+        ov_bi->hud.addExtraRow("Avail RAM: " + ru_bi->ramInfo.ullAvailPhys);
+    if (ru_bi->ramInfo.show_ullAvailPageFile)
+        ov_bi->hud.addExtraRow("Avail Page: " + ru_bi->ramInfo.ullAvailPageFile);
+    if (ru_bi->ramInfo.show_ullTotalVirtual)
+        ov_bi->hud.addExtraRow("Total Virt: " + ru_bi->ramInfo.ullTotalVirtual);
+    if (ru_bi->ramInfo.show_ullAvailVirtual)
+        ov_bi->hud.addExtraRow("Avail Virt: " + ru_bi->ramInfo.ullAvailVirtual);
+    if (ru_bi->ramInfo.show_ullAvailExtendedVirtual)
+        ov_bi->hud.addExtraRow("Ext Virt: " + ru_bi->ramInfo.ullAvailExtendedVirtual);
+
+    if (bi_bi->info_1s.Voltage_)
+        ov_bi->hud.addExtraRow("Voltage: " + bi_bi->info_1s.Voltage);
+    if (bi_bi->info_1s.Rate_)
+        ov_bi->hud.addExtraRow("Rate: " + bi_bi->info_1s.Rate);
+    if (bi_bi->info_1s.PowerState_)
+        ov_bi->hud.addExtraRow("Power: " + bi_bi->info_1s.PowerState);
+    if (bi_bi->info_1s.RemainingCapacity_)
+        ov_bi->hud.addExtraRow("Remaining: " + bi_bi->info_1s.RemainingCapacity);
+    if (bi_bi->info_1s.ChargeLevel_)
+        ov_bi->hud.addExtraRow("Charge: " + bi_bi->info_1s.ChargeLevel);
+    if (bi_bi->info_10s.TimeRemaining_)
+        ov_bi->hud.addExtraRow("Time Left: " + bi_bi->info_10s.TimeRemaining);
+
+    ov_bi->Render();
 }
 
 void win_bi::OnKeyDown(WPARAM wParam)
 {
     if (wParam == VK_ESCAPE && ru_bi->exit_on_key_esc == true)
         SendMessage(hwnd, WM_CLOSE, 0, 0);
-    // else if (wParam == 'N')
-    //     ov_bi->CreateOverlayWindow(hInstance, hwnd);
 }
 
 void win_bi::OnKeyUp(WPARAM wParam)
@@ -451,72 +625,83 @@ void win_bi::OnMouseWheel(WPARAM wParam, LPARAM lParam)
 {
     short delta = GET_WHEEL_DELTA_WPARAM(wParam);
 
-    if (draw_bibi_bi->selectedTab == draw_batteryinfo_bi::SETTINGS && ov_bi->show_on_screen_display == true)
-    {
-        draw_bibi_bi->scrollOffsetY -= delta * 0.2f;
+    draw_bibi_bi->scrollOffsetY -= delta * 0.2f;
+    draw_bibi_bi->clampScroll();
 
-        if (draw_bibi_bi->scrollOffsetY < 0)
-            draw_bibi_bi->scrollOffsetY = 0;
-        if (draw_bibi_bi->scrollOffsetY > draw_bibi_bi->contentHeight - draw_bibi_bi->viewHeight)
-            draw_bibi_bi->scrollOffsetY = draw_bibi_bi->contentHeight - draw_bibi_bi->viewHeight;
-
-        InvalidateRect(hwnd, NULL, TRUE);
-    }
+    InvalidateRect(hwnd, NULL, TRUE);
 }
 
 void win_bi::OnLeftButtonDown(WPARAM wParam, LPARAM lParam)
 {
-    // Отримуємо координати кліка в клієнтських координатах
     POINT click;
     click.x = GET_X_LPARAM(lParam);
     click.y = GET_Y_LPARAM(lParam);
 
+    float scale = dpi_bi::scaleForWindow(hwnd);
+    if (scale > 0.01f)
+    {
+        click.x = (LONG)((float)click.x / scale + 0.5f);
+        click.y = (LONG)((float)click.y / scale + 0.5f);
+    }
+
     if (draw_bibi_bi->isCursorInBatteryStatus(click))
     {
-        draw_bibi_bi->selectedTab = draw_batteryinfo_bi::BATTERY_INFO;
+        draw_bibi_bi->setTab(draw_batteryinfo_bi::BATTERY_INFO);
         InvalidateRect(hwnd, nullptr, TRUE);
         return;
     }
     if (draw_bibi_bi->isCursorInSettings(click))
     {
-        draw_bibi_bi->selectedTab = draw_batteryinfo_bi::SETTINGS;
+        draw_bibi_bi->setTab(draw_batteryinfo_bi::SETTINGS);
         InvalidateRect(hwnd, nullptr, TRUE);
         return;
     }
     if (draw_bibi_bi->isCursorInAboutMe(click))
     {
-        draw_bibi_bi->selectedTab = draw_batteryinfo_bi::ABOUT_ME;
+        draw_bibi_bi->setTab(draw_batteryinfo_bi::ABOUT_ME);
         InvalidateRect(hwnd, nullptr, TRUE);
         return;
     }
     if (draw_bibi_bi->isCursorInAppearance(click))
     {
-        draw_bibi_bi->selectedTab = draw_batteryinfo_bi::APPEARANCE;
+        draw_bibi_bi->setTab(draw_batteryinfo_bi::APPEARANCE);
         InvalidateRect(hwnd, nullptr, TRUE);
         return;
     }
 
-    // Якщо ми на вкладці SETTINGS — обробляємо тумблери
     if (draw_bibi_bi->selectedTab == draw_batteryinfo_bi::SETTINGS)
     {
+        bool wasAutostart = ru_bi->start_With_Windows;
+        bool wasAdmin = ru_bi->start_As_Admin;
+
         if (draw_bibi_bi->handleSwitchClick(click))
         {
+            if (ru_bi->start_As_Admin != wasAdmin)
+            {
+                ru_bi->toggleStartAsAdmin();
+            }
+            else if (ru_bi->start_With_Windows != wasAutostart)
+            {
+                ru_bi->toggleStartWithWindows();
+            }
+
+            SaveSettings();
             InvalidateRect(hwnd, nullptr, TRUE);
             return;
         }
     }
 
-    // Якщо ми на вкладці APPEARANCE — обробляємо кліки по тумблерам/квадратиках палітри
     if (draw_bibi_bi->selectedTab == draw_batteryinfo_bi::APPEARANCE)
     {
-        if (draw_bibi_bi->handleAppearanceClick(click))
+        if (draw_bibi_bi->handleAppearanceClick(click, ov_bi.get()))
         {
-            // Оновлюємо кисті, щоб зміни відобразилися миттєво
             ID2D1HwndRenderTarget *pRT = initd2d1_bi->GetOrCreateRenderTarget(hwnd);
             if (pRT)
             {
                 draw_bibi_bi->updateBrushes(pRT);
             }
+
+            SaveSettings();
             InvalidateRect(hwnd, nullptr, TRUE);
             return;
         }
@@ -537,19 +722,21 @@ void win_bi::OnTimer(WPARAM wParam)
     case 1:
         bi_bi->QueryBatteryInfo();
         bi_bi->QueryBatteryStatus();
-        // bi_bi->QueryCpuInfo();
-        // bi_bi->QueryRamInfo();
         UpdateTrayTooltip();
 
-        if (ov_bi->show_on_screen_display == true)
-            UpdateOverlayText();
-
-        InvalidateRect(hwnd, NULL, true);
+        if (IsWindowVisible(hwnd))
+            InvalidateRect(hwnd, NULL, true);
         break;
 
     case 2:
         bi_bi->QueryBatteryRemaining();
-        InvalidateRect(hwnd, NULL, true);
+        if (IsWindowVisible(hwnd))
+            InvalidateRect(hwnd, NULL, true);
+        break;
+
+    case 3:
+        if (ov_bi && ov_bi->show_on_screen_display)
+            UpdateOverlayHud();
         break;
     }
 }
@@ -573,14 +760,21 @@ void win_bi::OnChar(WPARAM wParam)
 
 void win_bi::OnGetMinMaxInfo(LPARAM lParam)
 {
+    float scale = (float)dpi_bi::forWindow(hwnd) / 96.0f;
+
     MINMAXINFO *mmi = (MINMAXINFO *)lParam;
-    mmi->ptMinTrackSize.x = 550;
-    mmi->ptMinTrackSize.y = 750;
+    mmi->ptMinTrackSize.x = (LONG)(WINDOW_DIP_W * scale);
+    mmi->ptMinTrackSize.y = (LONG)(WINDOW_DIP_H * scale);
+}
+
+void win_bi::SaveSettings()
+{
+    settings.collectFrom(ru_bi.get(), ov_bi.get(), draw_bibi_bi.get(), bi_bi.get());
+    settings.save();
 }
 
 void win_bi::OnClose()
 {
-    OutputDebugString("WM_CLOSE received\n");
     if (ru_bi && ru_bi->minimize_To_Tray)
     {
         ShowWindow(hwnd, SW_HIDE);
@@ -592,28 +786,97 @@ void win_bi::OnClose()
 
 void win_bi::OnDestroy()
 {
-    ru_bi->cleanup();
-    draw_bibi_bi->~draw_batteryinfo_bi();
-    ov_bi->~overlay_bi();
-    initdwrite_bi->CleanupDirectWrite();
+    if (destroyed)
+        return;
+
+    destroyed = true;
+
     KillTimer(hwnd, 1);
     KillTimer(hwnd, 2);
+    KillTimer(hwnd, 3);
+    UnregisterHotKey(hwnd, HOTKEY_TOGGLE_HUD);
     RemoveTrayIcon();
+
+    SaveSettings();
+
+    etwTrace.reset();
+    ov_bi.reset();
+
+    if (initdwrite_bi)
+        initdwrite_bi->CleanupDirectWrite();
+
+    if (ru_bi)
+        ru_bi->cleanup();
+
+    draw_bibi_bi.reset();
+    initd2d1_bi.reset();
+    ru_bi.reset();
+    bi_bi.reset();
+
+    log_bi::shutdown();
+
     PostQuitMessage(0);
+}
+
+static void focusExistingInstance()
+{
+    HWND existing = FindWindowA(APP_WINDOW_CLASS, NULL);
+    if (!existing)
+        return;
+
+    ShowWindow(existing, SW_RESTORE);
+    SetForegroundWindow(existing);
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
-    win_bi mainWindow(hInstance);
-    if (!mainWindow.Register() || !mainWindow.Create(nCmdShow))
+    log_bi::init();
+
+    int exitCode = 0;
+    if (autostart_bi::handleCommandLine(lpCmdLine, &exitCode))
     {
+        log_bi::shutdown();
+        return exitCode;
+    }
+
+    bool fromTask = lpCmdLine && strstr(lpCmdLine, autostart_bi::ARG_FROM_TASK) != NULL;
+
+    if (!fromTask && !autostart_bi::isElevated() && autostart_bi::taskExists())
+    {
+        log_bi::write("not elevated but task exists — relaunching through Task Scheduler");
+        if (autostart_bi::runTask())
+        {
+            log_bi::shutdown();
+            return 0;
+        }
+        log_bi::write("relaunch failed, continuing without elevation");
+    }
+
+    HANDLE instanceMutex = CreateMutexA(NULL, TRUE, APP_MUTEX_NAME);
+    if (instanceMutex && GetLastError() == ERROR_ALREADY_EXISTS)
+    {
+        log_bi::write("another instance is already running, focusing it");
+        focusExistingInstance();
+        CloseHandle(instanceMutex);
+        log_bi::shutdown();
         return 0;
     }
 
-    if (mainWindow.ru_bi && mainWindow.ru_bi->start_With_Windows)
+    int result = 0;
     {
-        mainWindow.ru_bi->enableStartWithWindows();
+        win_bi mainWindow(hInstance);
+        if (mainWindow.Register() && mainWindow.Create(nCmdShow))
+        {
+            result = (int)mainWindow.RunMessageLoop();
+        }
     }
 
-    return mainWindow.RunMessageLoop();
+    if (instanceMutex)
+    {
+        ReleaseMutex(instanceMutex);
+        CloseHandle(instanceMutex);
+    }
+
+    log_bi::shutdown();
+    return result;
 }

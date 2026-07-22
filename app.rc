@@ -1,0 +1,36 @@
+#include <winver.h>
+#include "include/resource_bi.h"
+#include "include/app_identity_bi.h"
+
+IDI_APPICON ICON "assets/kestrel.ico"
+
+1 24 "app.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION    APP_VERSION_MAJOR, APP_VERSION_MINOR, APP_VERSION_PATCH, APP_VERSION_BUILD
+PRODUCTVERSION APP_VERSION_MAJOR, APP_VERSION_MINOR, APP_VERSION_PATCH, APP_VERSION_BUILD
+FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+FILEFLAGS      0x0L
+FILEOS         VOS_NT_WINDOWS32
+FILETYPE       VFT_APP
+FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "semiloker"
+            VALUE "FileDescription",  "Kestrel - battery, system and frame-time overlay for Windows"
+            VALUE "FileVersion",      APP_VERSION_STRING
+            VALUE "InternalName",     APP_NAME
+            VALUE "LegalCopyright",   "MIT License"
+            VALUE "OriginalFilename", "kestrel.exe"
+            VALUE "ProductName",      APP_NAME
+            VALUE "ProductVersion",   APP_VERSION_STRING
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

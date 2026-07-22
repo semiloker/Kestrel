@@ -1,0 +1,15 @@
+* text=auto
+
+*.cpp   text
+*.h     text
+*.rc    text
+*.md    text
+*.yml   text
+*.py    text
+*.svg   text
+*.ini   text
+makefile text
+
+*.png   binary
+*.ico   binary
+*.exe   binary

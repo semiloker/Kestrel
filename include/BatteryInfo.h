@@ -24,10 +24,6 @@
     #define BatteryCycleCount ((BATTERY_QUERY_INFORMATION_LEVEL)6)
 #endif
 
-// #pragma comment(lib, "setupapi.lib")
-// #pragma comment(lib, "d2d1.lib")
-// #pragma comment(lib, "dwrite.lib")
-
 template<typename T>
 T clamp(T value, T min, T max)
 {
@@ -42,7 +38,7 @@ DEFINE_GUID(GUID_DEVINTERFACE_BATTERY,
 DEFINE_GUID(GUID_BATTERY_WMI_CYCLE_COUNT,
     0x2a2d7d6d, 0x8f1f, 0x457c, 0x9e, 0x1c, 0x3d, 0x7a, 0x2c, 0x91, 0x1d, 0x28);
 
-typedef struct _BATTERY_WMI_CYCLE_COUNT 
+typedef struct _BATTERY_WMI_CYCLE_COUNT
 {
     ULONG Tag;
     ULONG CycleCount;
@@ -58,7 +54,7 @@ private:
     ULONG tag;
 
 public:
-    struct bi_struct_static 
+    struct bi_struct_static
     {
         std::string Chemistry;
         std::string DesignedCapacity;
@@ -96,11 +92,11 @@ public:
     bi_struct_dynamic_1s info_1s;
     bi_struct_dynamic_10s info_10s;
 
-    batteryinfo_bi() : hDevInfo(INVALID_HANDLE_VALUE), hBattery(INVALID_HANDLE_VALUE), tag(0) 
+    batteryinfo_bi() : hDevInfo(INVALID_HANDLE_VALUE), hBattery(INVALID_HANDLE_VALUE), tag(0)
     {
     }
 
-    ~batteryinfo_bi() 
+    ~batteryinfo_bi()
     {
         if (hBattery != INVALID_HANDLE_VALUE)
             CloseHandle(hBattery);
@@ -114,11 +110,6 @@ public:
     bool QueryBatteryStatus();
     bool QueryBatteryRemaining();
     bool QueryBatteryCycleCount();
-
-    // FILETIME prevIdleTime = {}, prevKernelTime = {}, prevUserTime = {};
-
-    // bool QueryRamInfo();
-    // bool QueryCpuInfo();
 
     void PrintAllConsole() const;
 };

@@ -1,235 +1,667 @@
-#include "../include/overlay_bi.h"
+#include "overlay_bi.h"
+#include "app_identity_bi.h"
 
-overlay_bi* overlay_bi::instance = nullptr;
+#include <vector>
 
-overlay_bi::overlay_bi(HWND g_hwnd, HFONT g_hFont, RECT g_textRectPos, std::string g_text) 
-    : g_hwnd(g_hwnd), g_hFont(g_hFont), g_textRectPos(g_textRectPos), g_text(g_text) 
+static const char OVERLAY_CLASS_NAME[] = APP_OVERLAY_CLASS;
+
+static std::wstring toWide(const std::string &s)
 {
-    instance = this;
+    if (s.empty())
+        return std::wstring();
+
+    int len = MultiByteToWideChar(CP_ACP, 0, s.c_str(), (int)s.size(), NULL, 0);
+    if (len <= 0)
+        return std::wstring();
+
+    std::wstring out((size_t)len, L'\0');
+    MultiByteToWideChar(CP_ACP, 0, s.c_str(), (int)s.size(), &out[0], len);
+    return out;
 }
+
+overlay_bi::overlay_bi() {}
 
 overlay_bi::~overlay_bi()
 {
-    if (g_hwnd && IsWindow(g_hwnd))
-    {
-        DestroyWindow(g_hwnd);
-    }
-    g_hwnd = nullptr;
-
-    if (g_hFont)
-    {
-        DeleteObject(g_hFont);
-        g_hFont = nullptr;
-    }
+    DestroyOverlayWindow();
 }
 
-void overlay_bi::DestroyOverlayWindow()
+LRESULT CALLBACK overlay_bi::StaticWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-    if (g_hwnd && IsWindow(g_hwnd))
-    {
-        DestroyWindow(g_hwnd);
-        g_hwnd = nullptr;
-    }
-
-    if (g_hFont)
-    {
-        DeleteObject(g_hFont);
-        g_hFont = nullptr;
-    }
-}
-
-
-LRESULT CALLBACK overlay_bi::StaticWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    if (instance) 
-    {
-        return instance->WindowProc(hwnd, uMsg, wParam, lParam);
-    }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
-void overlay_bi::CreateOverlayWindow(HINSTANCE hInstance, HWND parentHwnd) 
+void overlay_bi::CreateOverlayWindow(HINSTANCE hInstance, HWND parentHwnd)
 {
-    if (g_hwnd != nullptr && IsWindow(g_hwnd)) 
-    {
-        return;
-    }
+    (void)parentHwnd;
 
-    const char CLASS_NAME[] = "TransparentOverlayClass";
+    if (g_hwnd != NULL && IsWindow(g_hwnd))
+        return;
+
+    hInst = hInstance;
 
     WNDCLASSA wc = {};
     wc.lpfnWndProc = StaticWindowProc;
     wc.hInstance = hInstance;
-    wc.lpszClassName = CLASS_NAME;
+    wc.lpszClassName = OVERLAY_CLASS_NAME;
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = NULL;
 
-    if (!GetClassInfoA(hInstance, CLASS_NAME, &wc))
-    {
+    WNDCLASSA existing = {};
+    if (!GetClassInfoA(hInstance, OVERLAY_CLASS_NAME, &existing))
         RegisterClassA(&wc);
-    }
 
-    int screenWidth = GetSystemMetrics(SM_CXSCREEN);
-    int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+    int w = (int)(layout.panelWidthFor(HUD_MIN_COLUMNS) + 0.5f);
+    int h = (int)(layout.padTop + 6.0f * layout.lineHeight + layout.graphHeight +
+                  layout.padBottom + 0.5f);
 
     g_hwnd = CreateWindowExA(
-        WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOOLWINDOW ,
-        CLASS_NAME,
-        "Transparent Overlay",
+        WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+        OVERLAY_CLASS_NAME,
+        APP_NAME " HUD",
         WS_POPUP,
-        0, 0,
-        screenWidth, screenHeight,
-        NULL,
-        NULL,
-        hInstance,
-        NULL
-    );
+        0, 0, w, h,
+        NULL, NULL, hInstance, NULL);
 
-    if (g_hwnd == NULL) 
-    {
-        MessageBoxA(NULL, "Failed to create window!", "Error", MB_ICONERROR);
+    if (g_hwnd == NULL)
         return;
-    }
 
-    SetLayeredWindowAttributes(g_hwnd, RGB(0, 0, 0), 0, LWA_COLORKEY);
+    BOOL disableTransitions = TRUE;
+    DwmSetWindowAttribute(g_hwnd, DWMWA_TRANSITIONS_FORCEDISABLED,
+                          &disableTransitions, sizeof(disableTransitions));
 
-    g_hFont = CreateFontA(
-        14,                         // Font height
-        0,                          // Character width
-        0,                          // Escape angle
-        0,                          // Orientation angle
-        FW_BOLD,                    // Font weight
-        FALSE,                      // Italic
-        FALSE,                      // Underline
-        FALSE,                      // Strikeout
-        DEFAULT_CHARSET,            // Character set
-        OUT_OUTLINE_PRECIS,         // Output precision
-        CLIP_DEFAULT_PRECIS,        // Clipping precision
-        CLEARTYPE_QUALITY,          // Quality
-        DEFAULT_PITCH | FF_SWISS,   // Pitch and family
-        "Segoe UI"                     // Font name
-    );
+    BOOL disablePeek = TRUE;
+    DwmSetWindowAttribute(g_hwnd, DWMWA_DISALLOW_PEEK, &disablePeek, sizeof(disablePeek));
 
-    BOOL enable = TRUE;
-    DwmSetWindowAttribute(g_hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, &enable, sizeof(enable));
-    
-    BOOL disableMaximize = TRUE;
-    DwmSetWindowAttribute(g_hwnd, DWMWA_DISALLOW_PEEK, &disableMaximize, sizeof(disableMaximize));
-    
-    SetWindowPos(g_hwnd, HWND_TOPMOST, 0, 0, screenWidth, screenHeight, 
-                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    
-    SetWindowLong(g_hwnd, GWL_EXSTYLE, 
-                 GetWindowLong(g_hwnd, GWL_EXSTYLE) | 
-                 WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE);
+    ShowWindow(g_hwnd, SW_SHOWNOACTIVATE);
 
-    ShowWindow(g_hwnd, SW_SHOW);
-    UpdateWindow(g_hwnd);
-    
-    RenderText(g_hwnd);
-    
-    ForceTopMost();
+    Render();
+}
+
+void overlay_bi::DestroyOverlayWindow()
+{
+    releaseGraphics();
+    releaseSurface();
+
+    if (g_hwnd && IsWindow(g_hwnd))
+        DestroyWindow(g_hwnd);
+
+    g_hwnd = NULL;
 }
 
 void overlay_bi::ForceTopMost()
 {
-    int screenWidth = GetSystemMetrics(SM_CXSCREEN);
-    int screenHeight = GetSystemMetrics(SM_CYSCREEN);
-    
-    SetWindowPos(g_hwnd, HWND_TOPMOST, 0, 0, screenWidth, screenHeight, 
-                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    if (!g_hwnd || !IsWindow(g_hwnd))
+        return;
+
+    if (GetWindow(g_hwnd, GW_HWNDPREV) == NULL)
+        return;
+
+    DWORD now = GetTickCount();
+    if (lastTopMostTick != 0 && (now - lastTopMostTick) < 500)
+        return;
+
+    lastTopMostTick = now;
+
+    SetWindowPos(g_hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOREDRAW);
 }
 
 void overlay_bi::UpdatePosition()
 {
-    int screenWidth = GetSystemMetrics(SM_CXSCREEN);
-    int screenHeight = GetSystemMetrics(SM_CYSCREEN);
-    
-    RECT currentRect;
-    GetWindowRect(g_hwnd, &currentRect);
-    
-    if (currentRect.right - currentRect.left != screenWidth || 
-        currentRect.bottom - currentRect.top != screenHeight) 
-        {
-        SetWindowPos(g_hwnd, HWND_TOPMOST, 0, 0, screenWidth, screenHeight, 
-                     SWP_NOACTIVATE);
-    } 
-    else 
-    {
-        SetWindowPos(g_hwnd, HWND_TOPMOST, 0, 0, 0, 0, 
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    }
+    Render();
 }
 
-LRESULT CALLBACK overlay_bi::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    switch (uMsg) 
-    {
-    case WM_CREATE:
-        return 0;
-        
-    case WM_PAINT:
-        RenderText(hwnd);
-        return 0;
-
-    case WM_DESTROY:
-        // PostQuitMessage(0);
-        return 0;
-
-    default:
-        return DefWindowProc(hwnd, uMsg, wParam, lParam);
-    }
-}
-
-void overlay_bi::RenderText(HWND hwnd) 
+const D2D1_COLOR_F &overlay_bi::resolveColor(hud_color_bi c) const
 {
-    PAINTSTRUCT ps;
-    HDC hdc = BeginPaint(hwnd, &ps);
-    
-    HDC memDC = CreateCompatibleDC(hdc);
-    RECT clientRect;
-    GetClientRect(hwnd, &clientRect);
-    HBITMAP memBitmap = CreateCompatibleBitmap(hdc, clientRect.right, clientRect.bottom);
-    HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
-    
-    HBRUSH blackBrush = CreateSolidBrush(RGB(0, 0, 0));
-    FillRect(memDC, &clientRect, blackBrush);
-    DeleteObject(blackBrush);
-
-    SetBkMode(memDC, TRANSPARENT);
-    
-    HFONT oldFont = (HFONT)SelectObject(memDC, g_hFont);
-    
-    SetTextColor(memDC, RGB(0, 0, 0));
-    for (int i = -1; i <= 1; i++) 
+    switch (c)
     {
-        for (int j = -1; j <= 1; j++) 
+    case HUD_COLOR_BLUE:
+        return theme.blue;
+    case HUD_COLOR_GREEN:
+        return theme.green;
+    case HUD_COLOR_ORANGE:
+        return theme.orange;
+    case HUD_COLOR_CYAN:
+        return theme.cyan;
+    case HUD_COLOR_MAGENTA:
+        return theme.magenta;
+    case HUD_COLOR_RED:
+        return theme.red;
+    default:
+        return theme.white;
+    }
+}
+
+bool overlay_bi::ensureGraphics()
+{
+    if (!pFactory)
+    {
+        if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &pFactory)) || !pFactory)
         {
-            if (i != 0 || j != 0)
-            {
-                RECT shadowRect = g_textRectPos;
-                OffsetRect(&shadowRect, i, j);
-                ::DrawTextA(memDC, g_text.c_str(), -1, &shadowRect, DT_LEFT | DT_TOP | DT_WORDBREAK);
-            }
+            pFactory = nullptr;
+            return false;
         }
     }
-    
-    SetTextColor(memDC, RGB(255, 255, 255));
-    ::DrawTextA(memDC, g_text.c_str(), -1, &g_textRectPos, DT_LEFT | DT_TOP | DT_WORDBREAK);
-    
-    BitBlt(hdc, 0, 0, clientRect.right, clientRect.bottom, memDC, 0, 0, SRCCOPY);
-    
-    SelectObject(memDC, oldFont);
-    SelectObject(memDC, oldBitmap);
-    DeleteObject(memBitmap);
-    DeleteDC(memDC);
-    
-    EndPaint(hwnd, &ps);
+
+    if (!pDWrite)
+    {
+        HRESULT hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
+                                         __uuidof(IDWriteFactory),
+                                         reinterpret_cast<IUnknown **>(&pDWrite));
+        if (FAILED(hr) || !pDWrite)
+        {
+            pDWrite = nullptr;
+            return false;
+        }
+    }
+
+    if (!setupFont())
+        return false;
+
+    if (!pRT)
+    {
+        D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
+            D2D1_RENDER_TARGET_TYPE_DEFAULT,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
+            96.0f, 96.0f,
+            D2D1_RENDER_TARGET_USAGE_GDI_COMPATIBLE,
+            D2D1_FEATURE_LEVEL_DEFAULT);
+
+        if (FAILED(pFactory->CreateDCRenderTarget(&props, &pRT)) || !pRT)
+        {
+            pRT = nullptr;
+            return false;
+        }
+
+        pRT->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+        pRT->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    }
+
+    return true;
 }
 
-void overlay_bi::UpdateText(const std::string& newText)
+bool overlay_bi::setupFont()
 {
-    g_text = newText;
+    if (pTextFormat)
+        return true;
 
-    HDC hdc = GetDC(g_hwnd);
-    RenderText(g_hwnd);
-    ReleaseDC(g_hwnd, hdc);
+    if (!pDWrite)
+        return false;
+
+    IDWriteFontCollection *collection = nullptr;
+    if (FAILED(pDWrite->GetSystemFontCollection(&collection, FALSE)) || !collection)
+        return false;
+
+    const wchar_t *candidates[] = {L"Cascadia Mono", L"Consolas", L"Courier New"};
+
+    IDWriteFont *font = nullptr;
+    const wchar_t *chosenFamily = nullptr;
+
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]) && !font; ++i)
+    {
+        UINT32 index = 0;
+        BOOL exists = FALSE;
+
+        if (FAILED(collection->FindFamilyName(candidates[i], &index, &exists)) || !exists)
+            continue;
+
+        IDWriteFontFamily *family = nullptr;
+        if (FAILED(collection->GetFontFamily(index, &family)) || !family)
+            continue;
+
+        if (SUCCEEDED(family->GetFirstMatchingFont(DWRITE_FONT_WEIGHT_NORMAL,
+                                                   DWRITE_FONT_STRETCH_NORMAL,
+                                                   DWRITE_FONT_STYLE_NORMAL,
+                                                   &font)) &&
+            font)
+        {
+            chosenFamily = candidates[i];
+        }
+
+        family->Release();
+    }
+
+    if (!font || !chosenFamily)
+    {
+        collection->Release();
+        return false;
+    }
+
+    float ascentPx = 0.0f;
+
+    IDWriteFontFace *face = nullptr;
+    if (SUCCEEDED(font->CreateFontFace(&face)) && face)
+    {
+        DWRITE_FONT_METRICS fm;
+        face->GetMetrics(&fm);
+
+        UINT32 codepoint = (UINT32)L'0';
+        UINT16 glyph = 0;
+        DWRITE_GLYPH_METRICS gm;
+
+        if (fm.designUnitsPerEm > 0 &&
+            SUCCEEDED(face->GetGlyphIndices(&codepoint, 1, &glyph)) &&
+            SUCCEEDED(face->GetDesignGlyphMetrics(&glyph, 1, &gm, FALSE)) &&
+            gm.advanceWidth > 0)
+        {
+            float upem = (float)fm.designUnitsPerEm;
+            fontSize = layout.charAdvance * upem / (float)gm.advanceWidth;
+
+            glyphTopOffset = ((float)fm.ascent - (float)fm.capHeight) * fontSize / upem;
+            ascentPx = (float)fm.ascent * fontSize / upem;
+        }
+
+        face->Release();
+    }
+
+    HRESULT hr = pDWrite->CreateTextFormat(
+        chosenFamily, NULL,
+        DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL,
+        fontSize, L"en-us", &pTextFormat);
+
+    font->Release();
+    collection->Release();
+
+    if (FAILED(hr) || !pTextFormat)
+    {
+        pTextFormat = nullptr;
+        return false;
+    }
+
+    pTextFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    pTextFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+    pTextFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+
+    if (ascentPx > 0.0f)
+        pTextFormat->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
+                                    layout.lineHeight, ascentPx);
+
+    return true;
+}
+
+void overlay_bi::releaseGraphics()
+{
+    if (pBrush)
+    {
+        pBrush->Release();
+        pBrush = nullptr;
+    }
+    if (pTextFormat)
+    {
+        pTextFormat->Release();
+        pTextFormat = nullptr;
+    }
+    if (pRT)
+    {
+        pRT->Release();
+        pRT = nullptr;
+    }
+    if (pDWrite)
+    {
+        pDWrite->Release();
+        pDWrite = nullptr;
+    }
+    if (pFactory)
+    {
+        pFactory->Release();
+        pFactory = nullptr;
+    }
+}
+
+bool overlay_bi::ensureSurface(int width, int height)
+{
+    if (width <= 0 || height <= 0)
+        return false;
+
+    panelW = width;
+    panelH = height;
+
+    if (memDC && dib && surfaceW >= width && surfaceH >= height &&
+        surfaceW <= width * 2 && surfaceH <= height * 2)
+    {
+        return true;
+    }
+
+    releaseSurface();
+
+    width += 32;
+    height += 64;
+
+    HDC screenDC = GetDC(NULL);
+    if (!screenDC)
+        return false;
+
+    memDC = CreateCompatibleDC(screenDC);
+    ReleaseDC(NULL, screenDC);
+
+    if (!memDC)
+        return false;
+
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    dib = CreateDIBSection(memDC, &bmi, DIB_RGB_COLORS, &dibBits, NULL, 0);
+    if (!dib)
+    {
+        DeleteDC(memDC);
+        memDC = NULL;
+        return false;
+    }
+
+    oldBitmap = (HBITMAP)SelectObject(memDC, dib);
+    surfaceW = width;
+    surfaceH = height;
+
+    return true;
+}
+
+void overlay_bi::releaseSurface()
+{
+    if (memDC)
+    {
+        if (oldBitmap)
+        {
+            SelectObject(memDC, oldBitmap);
+            oldBitmap = NULL;
+        }
+        DeleteDC(memDC);
+        memDC = NULL;
+    }
+
+    if (dib)
+    {
+        DeleteObject(dib);
+        dib = NULL;
+    }
+
+    dibBits = nullptr;
+    surfaceW = 0;
+    surfaceH = 0;
+    panelW = 0;
+    panelH = 0;
+}
+
+void overlay_bi::drawLine(const std::string &text, float startColumn, float y, const D2D1_COLOR_F &color)
+{
+    if (text.empty() || !pTextFormat || !pBrush)
+        return;
+
+    float advance = layout.charAdvance;
+
+    size_t i = 0;
+    while (i < text.size())
+    {
+        bool isBracket = (text[i] == '[' || text[i] == ']');
+
+        size_t j = i;
+        while (j < text.size() && ((text[j] == '[' || text[j] == ']') == isBracket))
+            ++j;
+
+        std::wstring run = toWide(text.substr(i, j - i));
+        float x = layout.padLeft + (startColumn + (float)i) * advance;
+
+        pBrush->SetColor(isBracket ? theme.bracket : color);
+
+        D2D1_RECT_F rect = D2D1::RectF(x, y, curPanelW, y + layout.lineHeight);
+        pRT->DrawText(run.c_str(), (UINT32)run.size(), pTextFormat, rect, pBrush,
+                      D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
+
+        i = j;
+    }
+}
+
+void overlay_bi::drawSeries(const hud_series_bi &series, double scaleMax,
+                            float top, float axisY, const D2D1_COLOR_F &color)
+{
+    size_t n = series.size();
+    if (n < 2 || !pFactory || !pBrush)
+        return;
+
+    float left = layout.padLeft;
+    float right = curPanelW - layout.padRight;
+    float height = axisY - top;
+
+    float step = (right - left) / (float)(HUD_SAMPLE_COUNT - 1);
+
+    ID2D1PathGeometry *geometry = nullptr;
+    if (FAILED(pFactory->CreatePathGeometry(&geometry)) || !geometry)
+        return;
+
+    ID2D1GeometrySink *sink = nullptr;
+    if (FAILED(geometry->Open(&sink)) || !sink)
+    {
+        geometry->Release();
+        return;
+    }
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        double v = series.at(i);
+        if (v < 0.0)
+            v = 0.0;
+
+        float x = right - (float)(n - 1 - i) * step;
+        float y = axisY - (float)(v / scaleMax) * height;
+
+        D2D1_POINT_2F pt = D2D1::Point2F(x, y);
+
+        if (i == 0)
+            sink->BeginFigure(pt, D2D1_FIGURE_BEGIN_HOLLOW);
+        else
+            sink->AddLine(pt);
+    }
+
+    sink->EndFigure(D2D1_FIGURE_END_OPEN);
+    sink->Close();
+    sink->Release();
+
+    pBrush->SetColor(color);
+    pRT->DrawGeometry(geometry, pBrush, layout.graphStroke);
+
+    geometry->Release();
+}
+
+float overlay_bi::measureLayout(const std::vector<hud_element_bi> &elements) const
+{
+    float y = layout.padTop;
+    bool lastWasGraph = false;
+
+    for (size_t i = 0; i < elements.size(); ++i)
+    {
+        if (elements[i].kind == HUD_EL_ROW)
+        {
+            y += layout.lineHeight;
+            lastWasGraph = false;
+        }
+        else
+        {
+            y += layout.graphTopNudge + layout.graphHeight + layout.graphGap;
+            lastWasGraph = true;
+        }
+    }
+
+    if (lastWasGraph)
+        y -= layout.graphGap;
+
+    return y;
+}
+
+void overlay_bi::drawOneGraph(hud_graph_id_bi group, float top, float axisY)
+{
+    float left = layout.padLeft;
+    float right = curPanelW - layout.padRight;
+
+    int divisions = layout.gridDivisions > 0 ? layout.gridDivisions : 1;
+    float span = (right - left) - 1.0f;
+    float stepX = span / (float)divisions;
+
+    for (int i = 0; i <= divisions; ++i)
+    {
+        bool isEdge = (i == 0 || i == divisions);
+
+        float x = left + 0.5f + (float)i * stepX;
+
+        pBrush->SetColor(isEdge ? theme.axis : theme.grid);
+        pRT->DrawLine(D2D1::Point2F(x, top),
+                      D2D1::Point2F(x, axisY),
+                      pBrush, layout.gridStroke);
+    }
+
+    pBrush->SetColor(theme.axis);
+    pRT->DrawLine(D2D1::Point2F(left, axisY),
+                  D2D1::Point2F(right, axisY),
+                  pBrush, layout.axisStroke);
+
+    double scaleMax = 0.0;
+    for (int i = 0; i < HUD_M_COUNT; ++i)
+    {
+        const hud_metric_bi &m = hud.metrics[i];
+        if (m.graph == group && m.show && m.graphed && m.available &&
+            m.series.maximum() > scaleMax)
+        {
+            scaleMax = m.series.maximum();
+        }
+    }
+
+    if (scaleMax < 1.0)
+        scaleMax = 1.0;
+
+    for (int i = HUD_M_COUNT - 1; i >= 0; --i)
+    {
+        const hud_metric_bi &m = hud.metrics[i];
+        if (m.graph == group && m.show && m.graphed && m.available)
+            drawSeries(m.series, scaleMax, top, axisY, resolveColor(m.color));
+    }
+}
+
+void overlay_bi::Render()
+{
+    if (!g_hwnd || !IsWindow(g_hwnd))
+        return;
+
+    if (!ensureGraphics())
+        return;
+
+    hud.buildLayoutInto(layoutScratch);
+
+    const std::vector<hud_element_bi> &elements = layoutScratch;
+    if (elements.empty())
+        return;
+
+    int columns = hud.columnsFor(elements);
+
+    curPanelW = layout.panelWidthFor(columns);
+    curPanelH = measureLayout(elements) + layout.padBottom;
+
+    int w = (int)(curPanelW + 0.5f);
+    int h = (int)(curPanelH + 0.5f);
+
+    if (!ensureSurface(w, h))
+        return;
+
+    RECT rc = {0, 0, panelW, panelH};
+    if (FAILED(pRT->BindDC(memDC, &rc)))
+        return;
+
+    if (!pBrush)
+    {
+        if (FAILED(pRT->CreateSolidColorBrush(theme.white, &pBrush)) || !pBrush)
+        {
+            pBrush = nullptr;
+            return;
+        }
+    }
+
+    pRT->BeginDraw();
+    pRT->SetTransform(D2D1::Matrix3x2F::Identity());
+    pRT->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
+
+    pBrush->SetColor(theme.panel);
+
+    D2D1_ROUNDED_RECT panelRect = {
+        D2D1::RectF(0.0f, 0.0f, (float)panelW, (float)panelH),
+        layout.cornerRadius,
+        layout.cornerRadius};
+
+    pRT->FillRoundedRectangle(&panelRect, pBrush);
+
+    float y = layout.padTop;
+
+    for (size_t i = 0; i < elements.size(); ++i)
+    {
+        const hud_element_bi &el = elements[i];
+
+        if (el.kind == HUD_EL_ROW)
+        {
+            const D2D1_COLOR_F &rowColor = resolveColor(el.row.color);
+            float textY = y - glyphTopOffset;
+
+            drawLine(el.row.left, 0.0f, textY, rowColor);
+
+            if (!el.row.right.empty())
+            {
+                float column = (float)columns - (float)el.row.right.size();
+                if (column < 0.0f)
+                    column = 0.0f;
+
+                drawLine(el.row.right, column, textY, rowColor);
+            }
+
+            y += layout.lineHeight;
+        }
+        else
+        {
+            float top = y + layout.graphTopNudge;
+            float axisY = top + layout.graphHeight;
+
+            drawOneGraph(el.graph, top, axisY);
+
+            y = axisY + layout.graphGap;
+        }
+    }
+
+    if (FAILED(pRT->EndDraw()))
+    {
+        releaseGraphics();
+        return;
+    }
+
+    GdiFlush();
+
+    int screenW = GetSystemMetrics(SM_CXSCREEN);
+    int screenH = GetSystemMetrics(SM_CYSCREEN);
+
+    POINT ptDst;
+    ptDst.x = (corner == CORNER_TOP_RIGHT || corner == CORNER_BOTTOM_RIGHT)
+                  ? screenW - panelW - margin
+                  : margin;
+    ptDst.y = (corner == CORNER_BOTTOM_LEFT || corner == CORNER_BOTTOM_RIGHT)
+                  ? screenH - panelH - margin
+                  : margin;
+
+    POINT ptSrc = {0, 0};
+    SIZE size = {panelW, panelH};
+
+    BLENDFUNCTION blend = {};
+    blend.BlendOp = AC_SRC_OVER;
+    blend.SourceConstantAlpha = 255;
+    blend.AlphaFormat = AC_SRC_ALPHA;
+
+    HDC screenDC = GetDC(NULL);
+    if (screenDC)
+    {
+        UpdateLayeredWindow(g_hwnd, screenDC, &ptDst, &size,
+                            memDC, &ptSrc, 0, &blend, ULW_ALPHA);
+        ReleaseDC(NULL, screenDC);
+    }
+
+    ForceTopMost();
 }

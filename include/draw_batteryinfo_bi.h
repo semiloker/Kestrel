@@ -16,14 +16,12 @@ class draw_batteryinfo_bi
 public:
     draw_batteryinfo_bi()
     {
-        // Значення по-замовчуванню
-        textColor = D2D1::ColorF(0.1f, 0.1f, 0.1f);          // Темно-сірий текст
-        labelColor = D2D1::ColorF(0.4f, 0.4f, 0.4f);         // Сірий для назв
-        separatorColor = D2D1::ColorF(0.8f, 0.8f, 0.8f);     // Світло-сірий розділювач
-        backgroundColor = D2D1::ColorF(0.98f, 0.98f, 0.98f); // Майже білий фон
-        headerColor = D2D1::ColorF(0.2f, 0.4f, 0.8f);        // Акцент (синій)
+        textColor = D2D1::ColorF(0.1f, 0.1f, 0.1f);
+        labelColor = D2D1::ColorF(0.4f, 0.4f, 0.4f);
+        separatorColor = D2D1::ColorF(0.8f, 0.8f, 0.8f);
+        backgroundColor = D2D1::ColorF(0.98f, 0.98f, 0.98f);
+        headerColor = D2D1::ColorF(0.2f, 0.4f, 0.8f);
 
-        // appearance defaults
         accentColor = D2D1::ColorF(0.2f, 0.4f, 0.8f);
         nightMode = false;
 
@@ -42,21 +40,21 @@ public:
 
         pAccentBrush = nullptr;
 
-        colorPalette = 
+        colorPalette =
         {
-            D2D1::ColorF(0.20f, 0.40f, 0.80f), // blue
-            D2D1::ColorF(0.80f, 0.20f, 0.20f), // red
-            D2D1::ColorF(0.20f, 0.70f, 0.30f), // green
-            D2D1::ColorF(0.85f, 0.55f, 0.10f), // orange
-            D2D1::ColorF(0.55f, 0.15f, 0.85f), // purple
-            D2D1::ColorF(0.10f, 0.75f, 0.85f), // teal
-            D2D1::ColorF(0.95f, 0.20f, 0.65f), // pink
-            D2D1::ColorF(0.95f, 0.75f, 0.05f), // yellow
-            D2D1::ColorF(0.50f, 0.50f, 0.50f), // gray
-            D2D1::ColorF(0.15f, 0.35f, 0.15f), // dark green
-            D2D1::ColorF(0.40f, 0.20f, 0.10f), // brown
-            D2D1::ColorF(0.12f, 0.12f, 0.45f), // navy
-            D2D1::ColorF(0.30f, 0.60f, 0.60f), // aqua
+            D2D1::ColorF(0.20f, 0.40f, 0.80f),
+            D2D1::ColorF(0.80f, 0.20f, 0.20f),
+            D2D1::ColorF(0.20f, 0.70f, 0.30f),
+            D2D1::ColorF(0.85f, 0.55f, 0.10f),
+            D2D1::ColorF(0.55f, 0.15f, 0.85f),
+            D2D1::ColorF(0.10f, 0.75f, 0.85f),
+            D2D1::ColorF(0.95f, 0.20f, 0.65f),
+            D2D1::ColorF(0.95f, 0.75f, 0.05f),
+            D2D1::ColorF(0.50f, 0.50f, 0.50f),
+            D2D1::ColorF(0.15f, 0.35f, 0.15f),
+            D2D1::ColorF(0.40f, 0.20f, 0.10f),
+            D2D1::ColorF(0.12f, 0.12f, 0.45f),
+            D2D1::ColorF(0.30f, 0.60f, 0.60f),
             D2D1::ColorF(0.85f, 0.40f, 0.60f),
             D2D1::ColorF(0.65f, 0.40f, 0.95f),
             D2D1::ColorF(0.15f, 0.85f, 0.45f)};
@@ -92,10 +90,14 @@ public:
 
     selected_option selectedTab = BATTERY_INFO;
 
+    void setTab(selected_option tab);
+
+    void clampScroll();
+
     void drawHeaderBatteryInfoD2D(ID2D1HwndRenderTarget *pRT, batteryinfo_bi *bi_bi, init_dwrite_bi *initdwrite_bi, int startX, int startY, int lineHeight);
     void drawHeaderSettingsD2D(ID2D1HwndRenderTarget *pRT, init_dwrite_bi *initdwrite_bi, overlay_bi *ov_bi, resource_usage_bi *ru_bi, batteryinfo_bi *bi_bi);
     void drawHeaderAboutMeD2D(ID2D1HwndRenderTarget *pRT, init_dwrite_bi *initdwrite_bi, overlay_bi *ov_bi, resource_usage_bi *ru_bi, batteryinfo_bi *bi_bi);
-    void drawHeaderAppearanceD2D(ID2D1HwndRenderTarget *pRT, init_dwrite_bi *initdwrite_bi);
+    void drawHeaderAppearanceD2D(ID2D1HwndRenderTarget *pRT, init_dwrite_bi *initdwrite_bi, overlay_bi *ov_bi);
     void drawHeaders(ID2D1HwndRenderTarget *pRT, init_dwrite_bi *initdwrite_bi, int startX = 20, int startY = 20, int lineHeight = 24);
 
     bool initBrush(ID2D1HwndRenderTarget *pRT);
@@ -112,11 +114,20 @@ public:
     bool handleSwitchClick(POINT cursorPos);
 
     bool handleColorClick(POINT cursorPos);
-    bool handleAppearanceClick(POINT cursorPos);
+    bool handleCornerClick(POINT cursorPos, overlay_bi *ov_bi);
+    bool handleAppearanceClick(POINT cursorPos, overlay_bi *ov_bi);
+
+    const D2D1_COLOR_F &getAccentColor() const { return accentColor; }
+    void setAccentColor(const D2D1_COLOR_F &c) { accentColor = c; }
+
+    bool getNightMode() const { return nightMode; }
+    void setNightMode(bool on) { nightMode = on; }
 
     float scrollOffsetY = 0.0f;
     float contentHeight = 0.0f;
     float viewHeight = 0.0f;
+
+    float tabScroll[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 
     D2D1_RECT_F rectBatteryStatus{};
     D2D1_RECT_F rectSettings{};
@@ -158,6 +169,7 @@ private:
 
     std::vector<SwitchRect> switchRects;
     std::vector<D2D1_RECT_F> colorRects;
+    std::vector<D2D1_RECT_F> cornerRects;
 
     FLOAT maxWidth = 0;
 };

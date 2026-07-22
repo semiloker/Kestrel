@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to build and publish
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up MSYS2
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-make
+
+      - name: Build
+        shell: cmd
+        run: |
+          set "PATH=${{ steps.msys2.outputs.msys2-location }}\MINGW64\bin;%PATH%"
+          mingw32-make
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = if ($env:GITHUB_REF -like "refs/tags/*") {
+            $env:GITHUB_REF -replace "^refs/tags/", ""
+          } else {
+            "${{ github.event.inputs.tag }}"
+          }
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "releasing $tag"
+
+      - name: Verify binary identity matches the tag
+        shell: pwsh
+        run: |
+          $item = Get-Item bin/kestrel.exe
+          $info = $item.VersionInfo
+          Write-Host "product: $($info.ProductName)"
+          Write-Host "version: $($info.FileVersion)"
+
+          if ($info.ProductName -ne "Kestrel") { throw "wrong product name in version resource" }
+
+          $tag = "${{ steps.version.outputs.tag }}" -replace "^v", ""
+          $fileVersion = $info.FileVersion -replace "\.0$", ""
+          if (-not $info.FileVersion.StartsWith($tag)) {
+            Write-Warning "tag $tag does not match FileVersion $($info.FileVersion); update APP_VERSION in include/app_identity_bi.h"
+          }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item bin/kestrel.exe dist/
+          Copy-Item README.md dist/
+          Copy-Item LICENSE dist/
+
+          $hash = (Get-FileHash dist/kestrel.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  kestrel.exe" | Out-File -FilePath dist/kestrel.exe.sha256 -Encoding ascii
+          Write-Host "sha256: $hash"
+
+          Compress-Archive -Path dist/* -DestinationPath "kestrel-${{ steps.version.outputs.tag }}-win64.zip"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Kestrel ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.tag, '-') }}
+          files: |
+            bin/kestrel.exe
+            dist/kestrel.exe.sha256
+            kestrel-${{ steps.version.outputs.tag }}-win64.zip
+          body: |
+            ## Kestrel ${{ steps.version.outputs.tag }}
+
+            Battery, system and frame-time overlay for Windows.
+
+            ### Install
+
+            Download `kestrel.exe` and run it. No installer, nothing written
+            outside `%APPDATA%\Kestrel`.
+
+            Frame-timing metrics need administrator rights. Enable
+            **Run as administrator** in Settings to register a scheduled task
+            that starts Kestrel elevated without a UAC prompt on every login.
+
+            ### Verify the download
+
+            ```powershell
+            Get-FileHash kestrel.exe -Algorithm SHA256
+            ```
+
+            Compare against `kestrel.exe.sha256` attached below.
+
+            ### Requirements
+
+            Windows 10 version 1607 or newer, 64-bit.

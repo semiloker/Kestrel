@@ -1,0 +1,223 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (${{ matrix.msystem }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - msystem: MINGW64
+            prefix: mingw-w64-x86_64
+          - msystem: UCRT64
+            prefix: mingw-w64-ucrt-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSYS2
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: false
+          install: >-
+            ${{ matrix.prefix }}-gcc
+            ${{ matrix.prefix }}-make
+
+      - name: Show toolchain
+        shell: cmd
+        run: |
+          set "PATH=${{ steps.msys2.outputs.msys2-location }}\${{ matrix.msystem }}\bin;%PATH%"
+          gcc --version
+          mingw32-make --version
+          windres --version
+
+      - name: Build
+        shell: cmd
+        run: |
+          set "PATH=${{ steps.msys2.outputs.msys2-location }}\${{ matrix.msystem }}\bin;%PATH%"
+          mingw32-make
+
+      - name: Verify artifact
+        shell: pwsh
+        run: |
+          $exe = "bin/kestrel.exe"
+          if (-not (Test-Path $exe)) { throw "kestrel.exe was not produced" }
+          $item = Get-Item $exe
+          if ($item.Length -lt 500000) { throw "kestrel.exe is suspiciously small: $($item.Length) bytes" }
+          $info = $item.VersionInfo
+          Write-Host "size:    $($item.Length)"
+          Write-Host "product: $($info.ProductName)"
+          Write-Host "version: $($info.FileVersion)"
+          if ($info.ProductName -ne "Kestrel") { throw "version resource missing or wrong product name" }
+
+      - name: Rebuild from clean must succeed
+        shell: cmd
+        run: |
+          set "PATH=${{ steps.msys2.outputs.msys2-location }}\${{ matrix.msystem }}\bin;%PATH%"
+          mingw32-make clean
+          mingw32-make
+
+      - name: Upload binary
+        if: matrix.msystem == 'MINGW64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: kestrel-${{ github.sha }}
+          path: bin/kestrel.exe
+          if-no-files-found: error
+
+  warnings:
+    name: Warnings are errors
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSYS2
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-make
+
+      - name: Build with -Werror
+        shell: cmd
+        run: |
+          set "PATH=${{ steps.msys2.outputs.msys2-location }}\MINGW64\bin;%PATH%"
+          mingw32-make CXXFLAGS="-Wall -Werror -O2 -MMD -MP -Iinclude"
+
+  style:
+    name: Project style
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check style rules
+        run: python tools/check_style.py .
+
+  static-analysis:
+    name: Static analysis (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+
+      - name: Run cppcheck
+        run: |
+          cppcheck \
+            --enable=warning,performance,portability \
+            --inline-suppr \
+            --std=c++17 \
+            --language=c++ \
+            --error-exitcode=1 \
+            --suppress=missingInclude \
+            --suppress=missingIncludeSystem \
+            --suppress=unusedFunction \
+            --suppress=unmatchedSuppression \
+            -I include \
+            src
+
+  spelling:
+    name: Spelling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: codespell-project/actions-codespell@v2
+        with:
+          skip: ./.git,./assets,*.ico,*.png
+          ignore_words_list: crate,ba,nd,strin
+
+  logo:
+    name: Logo is reproducible
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Pillow
+        run: pip install pillow
+
+      - name: Regenerate logo
+        run: python tools/make_logo.py build-assets
+
+      - name: Verify icon contains every required size
+        run: |
+          python - <<'EOF'
+          from PIL import Image
+          expected = {16, 24, 32, 48, 64, 128, 256}
+          with Image.open("build-assets/kestrel.ico") as img:
+              sizes = {s[0] for s in img.info["sizes"]}
+          missing = expected - sizes
+          if missing:
+              raise SystemExit("icon is missing sizes: %s" % sorted(missing))
+          print("icon sizes:", sorted(sizes))
+          EOF
+
+      - name: Committed assets must exist
+        run: |
+          for f in assets/kestrel.ico assets/logo.png assets/logo.svg; do
+            test -f "$f" || { echo "missing $f"; exit 1; }
+          done
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Local links in README must resolve
+        run: |
+          python - <<'EOF'
+          import re, os, sys
+          text = open("README.md", encoding="utf-8").read()
+          targets = re.findall(r'\]\(([^)#]+)\)', text) + re.findall(r'src="([^"]+)"', text)
+          missing = []
+          for t in targets:
+              if t.startswith(("http://", "https://", "mailto:")):
+                  continue
+              if not os.path.exists(t):
+                  missing.append(t)
+          if missing:
+              print("unresolved local links:")
+              for m in missing:
+                  print(" ", m)
+              sys.exit(1)
+          print("all local README links resolve")
+          EOF
+
+      - name: README must not contain emoji
+        run: |
+          python - <<'EOF'
+          import sys
+          text = open("README.md", encoding="utf-8").read()
+          bad = [c for c in text if ord(c) > 0x2100 and c not in "—–‘’“”"]
+          if bad:
+              print("non-ascii symbols found in README:", sorted(set(bad)))
+              sys.exit(1)
+          print("README is emoji free")
+          EOF

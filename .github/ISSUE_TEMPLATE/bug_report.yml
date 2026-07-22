@@ -1,0 +1,90 @@
+name: Bug report
+description: Something does not work as described
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The log at `%APPDATA%\Kestrel\kestrel.log` is the single most useful
+        thing you can attach. It records why a metric was unavailable, which
+        process is being measured and which event source supplies frame timing.
+        It is rewritten on every start, so reproduce the problem first, then
+        close Kestrel and collect the file.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what did you get instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Enable the overlay
+        2. Start <game> in borderless windowed mode
+        3. The frame rate row shows dashes
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Kestrel version
+      description: Right-click kestrel.exe, Properties, Details, File version
+      placeholder: 1.2.0.0
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: Run winver
+      placeholder: Windows 11 24H2 build 26100
+    validations:
+      required: true
+
+  - type: input
+    id: hardware
+    attributes:
+      label: CPU and GPU
+      placeholder: Ryzen 7 8845HS, Radeon 780M
+    validations:
+      required: true
+
+  - type: dropdown
+    id: elevated
+    attributes:
+      label: Was Kestrel running as administrator?
+      options:
+        - "Yes"
+        - "No"
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: display-mode
+    attributes:
+      label: If this involves a game, how does it run?
+      options:
+        - Not a game problem
+        - Borderless windowed
+        - Windowed
+        - Exclusive fullscreen
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Contents of %APPDATA%\Kestrel\kestrel.log
+      render: text
+    validations:
+      required: true
