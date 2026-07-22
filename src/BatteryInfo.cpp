@@ -272,7 +272,7 @@ bool batteryinfo_bi::QueryBatteryStatus()
         info_1s.Voltage = "Unknown";
     }
 
-    info_1s.rateValid = bs.Rate != (ULONG)BATTERY_UNKNOWN_RATE;
+    info_1s.rateValid = (LONG)bs.Rate != (LONG)BATTERY_UNKNOWN_RATE;
     if (info_1s.rateValid)
     {
         info_1s.rateW = (double)(LONG)bs.Rate / 1000.0;

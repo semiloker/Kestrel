@@ -356,11 +356,15 @@ void resource_usage_bi::initGpuInfo()
     IDXGIFactory1 *factory = NULL;
     if (SUCCEEDED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void **)&factory)) && factory)
     {
-        IDXGIAdapter1 *adapter = NULL;
         SIZE_T best = 0;
 
-        for (UINT i = 0; factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i)
+        for (UINT i = 0;; ++i)
         {
+            IDXGIAdapter1 *adapter = NULL;
+
+            if (FAILED(factory->EnumAdapters1(i, &adapter)) || !adapter)
+                break;
+
             DXGI_ADAPTER_DESC1 desc;
             if (SUCCEEDED(adapter->GetDesc1(&desc)))
             {
@@ -371,7 +375,6 @@ void resource_usage_bi::initGpuInfo()
             }
 
             adapter->Release();
-            adapter = NULL;
         }
 
         if (best > 0)
