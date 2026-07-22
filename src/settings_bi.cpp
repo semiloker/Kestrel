@@ -199,11 +199,13 @@ void settings_bi::applyTo(resource_usage_bi *ru, overlay_bi *ov,
         ov->hud.showDevice = getBool("hud.device", ov->hud.showDevice);
         ov->hud.showDisplay = getBool("hud.display", ov->hud.showDisplay);
         ov->hud.showMem = getBool("hud.mem", ov->hud.showMem);
+        ov->hud.showLows = getBool("hud.lows", ov->hud.showLows);
     }
 
     if (draw)
     {
         draw->setNightMode(getBool("ui.nightMode", draw->getNightMode()));
+        draw->setSettingsGroup(getInt("ui.settingsGroup", draw->getSettingsGroup()));
 
         const D2D1_COLOR_F &cur = draw->getAccentColor();
         D2D1_COLOR_F accent;
@@ -268,11 +270,13 @@ void settings_bi::collectFrom(const resource_usage_bi *ru, const overlay_bi *ov,
         setBool("hud.device", ov->hud.showDevice);
         setBool("hud.display", ov->hud.showDisplay);
         setBool("hud.mem", ov->hud.showMem);
+        setBool("hud.lows", ov->hud.showLows);
     }
 
     if (draw)
     {
         setBool("ui.nightMode", draw->getNightMode());
+        setInt("ui.settingsGroup", draw->getSettingsGroup());
 
         const D2D1_COLOR_F &accent = draw->getAccentColor();
         setFloat("ui.accent.r", accent.r);

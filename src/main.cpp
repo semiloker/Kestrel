@@ -67,6 +67,8 @@ bool win_bi::Create(int nCmdShow)
     settings.load();
     settings.applyTo(ru_bi.get(), ov_bi.get(), draw_bibi_bi.get(), bi_bi.get());
 
+    updater.reset(new update_bi());
+
     etwTrace.reset(new etw_bi());
 
     int fbProv = settings.getInt("etw.fallbackProvider", -1);
@@ -87,8 +89,14 @@ bool win_bi::Create(int nCmdShow)
         log_bi::write("frame metrics disabled: %s", etwTrace->lastError());
 
     float scale = (float)dpi_bi::forSystem() / 96.0f;
-    int windowWidth = (int)(WINDOW_DIP_W * scale + 0.5f);
-    int windowHeight = (int)(WINDOW_DIP_H * scale + 0.5f);
+
+    RECT frame = {0, 0,
+                  (LONG)(WINDOW_DIP_W * scale + 0.5f),
+                  (LONG)(WINDOW_DIP_H * scale + 0.5f)};
+    AdjustWindowRectEx(&frame, WS_OVERLAPPEDWINDOW, FALSE, WS_EX_CLIENTEDGE);
+
+    int windowWidth = frame.right - frame.left;
+    int windowHeight = frame.bottom - frame.top;
 
     int screenWidth = GetSystemMetrics(SM_CXSCREEN);
     int screenHeight = GetSystemMetrics(SM_CYSCREEN);
@@ -187,6 +195,20 @@ LRESULT CALLBACK win_bi::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
     case WM_LBUTTONDOWN:
         pThis->OnLeftButtonDown(wParam, lParam);
         break;
+    case WM_LBUTTONUP:
+        pThis->OnLeftButtonUp(wParam, lParam);
+        break;
+    case WM_SETCURSOR:
+        if (LOWORD(lParam) == HTCLIENT && pThis->OnSetCursor())
+            return TRUE;
+        return DefWindowProc(hwnd, msg, wParam, lParam);
+    case WM_APP_UPDATE:
+        pThis->OnUpdateNotify();
+        break;
+    case WM_MOUSELEAVE:
+        if (pThis->draw_bibi_bi && pThis->draw_bibi_bi->clearHover())
+            InvalidateRect(hwnd, NULL, FALSE);
+        break;
     case WM_RBUTTONDOWN:
         pThis->OnRightButtonDown(wParam, lParam);
         break;
@@ -250,25 +272,32 @@ void win_bi::OnPaint(HWND hwnd)
 
         if (draw_bibi_bi->selectedTab == draw_batteryinfo_bi::BATTERY_INFO)
         {
-            draw_bibi_bi->drawHeaderBatteryInfoD2D(pRenderTarget, bi_bi.get(),
-                                                   initdwrite_bi.get(), 20, 30, 24);
+            draw_bibi_bi->drawBatteryTab(pRenderTarget, initdwrite_bi.get(), bi_bi.get());
         }
         else if (draw_bibi_bi->selectedTab == draw_batteryinfo_bi::SETTINGS)
         {
-            draw_bibi_bi->drawHeaderSettingsD2D(pRenderTarget, initdwrite_bi.get(),
-                                                ov_bi.get(), ru_bi.get(), bi_bi.get());
-        }
-        else if (draw_bibi_bi->selectedTab == draw_batteryinfo_bi::ABOUT_ME)
-        {
-            draw_bibi_bi->drawHeaderAboutMeD2D(pRenderTarget, initdwrite_bi.get(),
-                                               ov_bi.get(), ru_bi.get(), bi_bi.get());
+            draw_bibi_bi->drawSettingsTab(pRenderTarget, initdwrite_bi.get(),
+                                          ov_bi.get(), ru_bi.get(), bi_bi.get());
         }
         else if (draw_bibi_bi->selectedTab == draw_batteryinfo_bi::APPEARANCE)
         {
-            draw_bibi_bi->drawHeaderAppearanceD2D(pRenderTarget, initdwrite_bi.get(), ov_bi.get());
+            draw_bibi_bi->drawAppearanceTab(pRenderTarget, initdwrite_bi.get(), ov_bi.get());
+        }
+        else if (draw_bibi_bi->selectedTab == draw_batteryinfo_bi::ABOUT_ME)
+        {
+            draw_batteryinfo_bi::update_view_bi view;
+            view.state = (int)updater->state();
+            view.version = updater->latestVersion();
+            view.message = updater->message();
+            view.progress = updater->progressPercent();
+            view.backupAvailable = updater->backupExists();
+            view.backupVersion = updater->backupVersion();
+
+            draw_bibi_bi->drawAboutTab(pRenderTarget, initdwrite_bi.get(),
+                                       BuildDiagnostics(), view);
         }
 
-        draw_bibi_bi->drawHeaders(pRenderTarget, initdwrite_bi.get());
+        draw_bibi_bi->drawTabBar(pRenderTarget, initdwrite_bi.get());
 
         if (ov_bi)
         {
@@ -281,6 +310,7 @@ void win_bi::OnPaint(HWND hwnd)
         HRESULT hr = pRenderTarget->EndDraw();
         if (FAILED(hr) || hr == D2DERR_RECREATE_TARGET)
         {
+            draw_bibi_bi->releaseDeviceResources();
             initd2d1_bi->DiscardRenderTarget();
         }
     }
@@ -615,97 +645,264 @@ void win_bi::OnKeyUp(WPARAM wParam)
 {
 }
 
+POINT win_bi::ClientToDip(LPARAM lParam) const
+{
+    POINT p;
+    p.x = GET_X_LPARAM(lParam);
+    p.y = GET_Y_LPARAM(lParam);
+
+    float scale = dpi_bi::scaleForWindow(hwnd);
+    if (scale > 0.01f)
+    {
+        p.x = (LONG)((float)p.x / scale + 0.5f);
+        p.y = (LONG)((float)p.y / scale + 0.5f);
+    }
+
+    return p;
+}
+
 void win_bi::OnMouseMove(WPARAM wParam, LPARAM lParam)
 {
-    GetCursorPos(&pt);
-    ScreenToClient(hwnd, &pt);
+    if (!draw_bibi_bi)
+        return;
+
+    pt = ClientToDip(lParam);
+
+    if (draw_bibi_bi->isScrollDragging())
+    {
+        draw_bibi_bi->updateScrollDrag(pt);
+        InvalidateRect(hwnd, NULL, FALSE);
+        return;
+    }
+
+    TRACKMOUSEEVENT track = {};
+    track.cbSize = sizeof(track);
+    track.dwFlags = TME_LEAVE;
+    track.hwndTrack = hwnd;
+    TrackMouseEvent(&track);
+
+    if (draw_bibi_bi->setHover(pt))
+        InvalidateRect(hwnd, NULL, FALSE);
+}
+
+bool win_bi::OnSetCursor()
+{
+    if (!draw_bibi_bi)
+        return false;
+
+    POINT local;
+    GetCursorPos(&local);
+    ScreenToClient(hwnd, &local);
+
+    float scale = dpi_bi::scaleForWindow(hwnd);
+    if (scale > 0.01f)
+    {
+        local.x = (LONG)((float)local.x / scale + 0.5f);
+        local.y = (LONG)((float)local.y / scale + 0.5f);
+    }
+
+    if (draw_bibi_bi->isOverInteractive(local))
+    {
+        SetCursor(LoadCursor(NULL, IDC_HAND));
+        return true;
+    }
+
+    return false;
+}
+
+void win_bi::OnUpdateNotify()
+{
+    if (draw_bibi_bi->selectedTab == draw_batteryinfo_bi::ABOUT_ME)
+        InvalidateRect(hwnd, NULL, FALSE);
 }
 
 void win_bi::OnMouseWheel(WPARAM wParam, LPARAM lParam)
 {
     short delta = GET_WHEEL_DELTA_WPARAM(wParam);
 
-    draw_bibi_bi->scrollOffsetY -= delta * 0.2f;
-    draw_bibi_bi->clampScroll();
+    draw_bibi_bi->scrollBy(-delta * 0.4f);
 
     InvalidateRect(hwnd, NULL, TRUE);
 }
 
+void win_bi::OnLeftButtonUp(WPARAM wParam, LPARAM lParam)
+{
+    if (draw_bibi_bi->isScrollDragging())
+    {
+        draw_bibi_bi->endScrollDrag();
+        ReleaseCapture();
+        InvalidateRect(hwnd, NULL, FALSE);
+    }
+}
+
 void win_bi::OnLeftButtonDown(WPARAM wParam, LPARAM lParam)
 {
-    POINT click;
-    click.x = GET_X_LPARAM(lParam);
-    click.y = GET_Y_LPARAM(lParam);
+    POINT click = ClientToDip(lParam);
 
-    float scale = dpi_bi::scaleForWindow(hwnd);
-    if (scale > 0.01f)
+    if (draw_bibi_bi->beginScrollDrag(click))
     {
-        click.x = (LONG)((float)click.x / scale + 0.5f);
-        click.y = (LONG)((float)click.y / scale + 0.5f);
-    }
+        if (draw_bibi_bi->isScrollDragging())
+            SetCapture(hwnd);
 
-    if (draw_bibi_bi->isCursorInBatteryStatus(click))
-    {
-        draw_bibi_bi->setTab(draw_batteryinfo_bi::BATTERY_INFO);
-        InvalidateRect(hwnd, nullptr, TRUE);
-        return;
-    }
-    if (draw_bibi_bi->isCursorInSettings(click))
-    {
-        draw_bibi_bi->setTab(draw_batteryinfo_bi::SETTINGS);
-        InvalidateRect(hwnd, nullptr, TRUE);
-        return;
-    }
-    if (draw_bibi_bi->isCursorInAboutMe(click))
-    {
-        draw_bibi_bi->setTab(draw_batteryinfo_bi::ABOUT_ME);
-        InvalidateRect(hwnd, nullptr, TRUE);
-        return;
-    }
-    if (draw_bibi_bi->isCursorInAppearance(click))
-    {
-        draw_bibi_bi->setTab(draw_batteryinfo_bi::APPEARANCE);
-        InvalidateRect(hwnd, nullptr, TRUE);
+        InvalidateRect(hwnd, NULL, FALSE);
         return;
     }
 
-    if (draw_bibi_bi->selectedTab == draw_batteryinfo_bi::SETTINGS)
-    {
-        bool wasAutostart = ru_bi->start_With_Windows;
-        bool wasAdmin = ru_bi->start_As_Admin;
+    draw_batteryinfo_bi::click_result_bi result =
+        draw_bibi_bi->handleClick(click, ov_bi.get(), ru_bi.get(), bi_bi.get());
 
-        if (draw_bibi_bi->handleSwitchClick(click))
+    if (!result.handled)
+        return;
+
+    if (result.toggledAdmin)
+        ru_bi->toggleStartAsAdmin();
+    else if (result.toggledAutostart)
+        ru_bi->toggleStartWithWindows();
+
+    if (result.needsBrushRebuild)
+    {
+        ID2D1HwndRenderTarget *pRT = initd2d1_bi->GetOrCreateRenderTarget(hwnd);
+        if (pRT)
+            draw_bibi_bi->updateBrushes(pRT);
+    }
+
+    if (result.action != draw_batteryinfo_bi::ACT_NONE)
+        RunAction(result.action);
+
+    if (result.needsSave)
+        SaveSettings();
+
+    if (ov_bi && ov_bi->show_on_screen_display)
+        UpdateOverlayHud();
+
+    InvalidateRect(hwnd, nullptr, TRUE);
+}
+
+void win_bi::RunAction(int action)
+{
+    switch (action)
+    {
+    case draw_batteryinfo_bi::ACT_RESTART_ADMIN:
+        if (!ru_bi->start_As_Admin)
         {
-            if (ru_bi->start_As_Admin != wasAdmin)
-            {
-                ru_bi->toggleStartAsAdmin();
-            }
-            else if (ru_bi->start_With_Windows != wasAutostart)
-            {
-                ru_bi->toggleStartWithWindows();
-            }
-
+            ru_bi->start_As_Admin = true;
+            ru_bi->toggleStartAsAdmin();
             SaveSettings();
-            InvalidateRect(hwnd, nullptr, TRUE);
-            return;
         }
-    }
 
-    if (draw_bibi_bi->selectedTab == draw_batteryinfo_bi::APPEARANCE)
-    {
-        if (draw_bibi_bi->handleAppearanceClick(click, ov_bi.get()))
+        if (autostart_bi::runTask())
         {
-            ID2D1HwndRenderTarget *pRT = initd2d1_bi->GetOrCreateRenderTarget(hwnd);
-            if (pRT)
-            {
-                draw_bibi_bi->updateBrushes(pRT);
-            }
-
-            SaveSettings();
-            InvalidateRect(hwnd, nullptr, TRUE);
-            return;
+            log_bi::write("restarting elevated through Task Scheduler");
+            DestroyWindow(hwnd);
         }
+        else
+        {
+            log_bi::write("elevated restart failed");
+            MessageBoxA(hwnd,
+                        "Could not restart with administrator rights.\n"
+                        "Close Kestrel and start it with 'Run as administrator'.",
+                        APP_NAME, MB_ICONWARNING | MB_OK);
+        }
+        break;
+
+    case draw_batteryinfo_bi::ACT_OPEN_REPO:
+        ShellExecuteA(hwnd, "open", APP_REPO_URL, NULL, NULL, SW_SHOWNORMAL);
+        break;
+
+    case draw_batteryinfo_bi::ACT_OPEN_ISSUES:
+        ShellExecuteA(hwnd, "open", APP_ISSUES_URL, NULL, NULL, SW_SHOWNORMAL);
+        break;
+
+    case draw_batteryinfo_bi::ACT_OPEN_LICENCE:
+        ShellExecuteA(hwnd, "open", APP_LICENCE_URL, NULL, NULL, SW_SHOWNORMAL);
+        break;
+
+    case draw_batteryinfo_bi::ACT_OPEN_LOG:
+    {
+        std::string path = paths_bi::inDataDir(APP_LOG_FILE);
+        if (!path.empty())
+            ShellExecuteA(hwnd, "open", path.c_str(), NULL, NULL, SW_SHOWNORMAL);
+        break;
     }
+
+    case draw_batteryinfo_bi::ACT_CHECK_UPDATE:
+        updater->checkAsync(hwnd);
+        break;
+
+    case draw_batteryinfo_bi::ACT_DOWNLOAD_UPDATE:
+        updater->downloadAsync(hwnd);
+        break;
+
+    case draw_batteryinfo_bi::ACT_INSTALL_UPDATE:
+        SaveSettings();
+
+        if (updater->applyAndRestart())
+        {
+            DestroyWindow(hwnd);
+        }
+        else
+        {
+            MessageBoxA(hwnd,
+                        "Could not install the update.\n"
+                        "Kestrel could not replace its own file. If it lives in a\n"
+                        "protected folder, move it somewhere writable and try again.",
+                        APP_NAME, MB_ICONWARNING | MB_OK);
+        }
+        break;
+
+    case draw_batteryinfo_bi::ACT_ROLLBACK:
+        SaveSettings();
+
+        if (updater->rollback())
+        {
+            DestroyWindow(hwnd);
+        }
+        else
+        {
+            MessageBoxA(hwnd, "Could not restore the previous version.",
+                        APP_NAME, MB_ICONWARNING | MB_OK);
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
+draw_batteryinfo_bi::diag_bi win_bi::BuildDiagnostics() const
+{
+    draw_batteryinfo_bi::diag_bi diag;
+
+    if (etwTrace)
+    {
+        diag.frameTiming = etwTrace->running() &&
+                           ov_bi && ov_bi->hud.metrics[HUD_M_FPS].available;
+
+        if (!etwTrace->running())
+            diag.frameReason = autostart_bi::isElevated() ? "Trace session refused"
+                                                          : "Needs administrator";
+        else if (!diag.frameTiming)
+            diag.frameReason = "No frames from the foreground app";
+    }
+    else
+    {
+        diag.frameReason = "Not started";
+    }
+
+    if (ru_bi)
+    {
+        diag.cpuPower = ru_bi->cpuInfo.packagePowerAvailable;
+        diag.gpuName = ru_bi->gpuInfo.gpuName;
+        diag.threads = (int)ru_bi->cpuInfo.CoreUsagePercents.size();
+    }
+
+    if (bi_bi)
+    {
+        diag.battery = bi_bi->present;
+        diag.chemistry = bi_bi->info_static.Chemistry;
+    }
+
+    return diag;
 }
 
 void win_bi::OnRightButtonDown(WPARAM wParam, LPARAM lParam)
@@ -762,9 +959,14 @@ void win_bi::OnGetMinMaxInfo(LPARAM lParam)
 {
     float scale = (float)dpi_bi::forWindow(hwnd) / 96.0f;
 
+    RECT frame = {0, 0,
+                  (LONG)(WINDOW_DIP_W * scale + 0.5f),
+                  (LONG)(WINDOW_DIP_H * scale + 0.5f)};
+    AdjustWindowRectEx(&frame, WS_OVERLAPPEDWINDOW, FALSE, WS_EX_CLIENTEDGE);
+
     MINMAXINFO *mmi = (MINMAXINFO *)lParam;
-    mmi->ptMinTrackSize.x = (LONG)(WINDOW_DIP_W * scale);
-    mmi->ptMinTrackSize.y = (LONG)(WINDOW_DIP_H * scale);
+    mmi->ptMinTrackSize.x = frame.right - frame.left;
+    mmi->ptMinTrackSize.y = frame.bottom - frame.top;
 }
 
 void win_bi::SaveSettings()
@@ -799,6 +1001,10 @@ void win_bi::OnDestroy()
 
     SaveSettings();
 
+    if (updater)
+        updater->cancel();
+
+    updater.reset();
     etwTrace.reset();
     ov_bi.reset();
 
@@ -843,7 +1049,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     if (!fromTask && !autostart_bi::isElevated() && autostart_bi::taskExists())
     {
-        log_bi::write("not elevated but task exists — relaunching through Task Scheduler");
+        log_bi::write("not elevated but task exists, relaunching through Task Scheduler");
         if (autostart_bi::runTask())
         {
             log_bi::shutdown();

@@ -26,7 +26,7 @@ RES_OBJ = $(OBJ_DIR)/app_rc.o
 LIBS = -lwbemuuid -lole32 -loleaut32 -loleacc -luuid \
        -lgdi32 -lshell32 -lsetupapi -ld2d1 -ldwrite \
        -ldwmapi -lpdh -liphlpapi -ladvapi32 -lwinpthread -lpsapi \
-       -ltaskschd -lshlwapi -luser32
+       -ltaskschd -lshlwapi -luser32 -lwinhttp -lversion
 
 all: $(TARGET)
 

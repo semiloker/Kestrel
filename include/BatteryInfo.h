@@ -63,6 +63,18 @@ public:
         std::string DefaultAlert2;
         std::string WearLevel;
         std::string CycleCount;
+
+        double designedWh = 0.0;
+        double fullChargedWh = 0.0;
+        double alert1Wh = 0.0;
+        double alert2Wh = 0.0;
+        double wearPercent = 0.0;
+        int cycleCount = 0;
+
+        bool capacityValid = false;
+        bool wearValid = false;
+        bool cycleCountValid = false;
+        bool alertsValid = false;
     };
 
     struct bi_struct_dynamic_1s
@@ -72,6 +84,20 @@ public:
         std::string PowerState;
         std::string RemainingCapacity;
         std::string ChargeLevel;
+
+        double voltageV = 0.0;
+        double rateW = 0.0;
+        double remainingWh = 0.0;
+        double chargePercent = 0.0;
+
+        bool voltageValid = false;
+        bool rateValid = false;
+        bool remainingValid = false;
+        bool chargeValid = false;
+
+        bool charging = false;
+        bool discharging = false;
+        bool onLine = false;
 
         bool Voltage_ = false;
         bool Rate_ = false;
@@ -85,12 +111,17 @@ public:
         std::string TimeRemaining;
         std::string TimeToFullCharge;
 
+        int minutesToEmpty = -1;
+        int minutesToFull = -1;
+
         bool TimeRemaining_ = false;
     };
 
     bi_struct_static info_static;
     bi_struct_dynamic_1s info_1s;
     bi_struct_dynamic_10s info_10s;
+
+    bool present = false;
 
     batteryinfo_bi() : hDevInfo(INVALID_HANDLE_VALUE), hBattery(INVALID_HANDLE_VALUE), tag(0)
     {

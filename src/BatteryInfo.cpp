@@ -1,4 +1,5 @@
 #include "BatteryInfo.h"
+#include "logger_bi.h"
 
 bool batteryinfo_bi::Initialize()
 {
@@ -37,7 +38,11 @@ bool batteryinfo_bi::Initialize()
     if (hBattery == INVALID_HANDLE_VALUE)
         return false;
 
-    return QueryTag() && QueryBatteryInfo() && QueryBatteryStatus() && QueryBatteryRemaining()  && QueryBatteryCycleCount();
+    present = QueryTag() && QueryBatteryInfo() && QueryBatteryStatus() && QueryBatteryRemaining();
+
+    QueryBatteryCycleCount();
+
+    return present;
 }
 
 bool batteryinfo_bi::QueryTag()
@@ -115,7 +120,7 @@ bool batteryinfo_bi::QueryBatteryCycleCount()
 
     IEnumWbemClassObject *pEnumerator = nullptr;
     BSTR language = SysAllocString(L"WQL");
-    BSTR query = SysAllocString(L"SELECT * FROM BatteryStatus");
+    BSTR query = SysAllocString(L"SELECT * FROM BatteryCycleCount");
     hres = pSvc->ExecQuery(
         language, query,
         WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
@@ -147,10 +152,13 @@ bool batteryinfo_bi::QueryBatteryCycleCount()
             std::ostringstream oss;
             oss << vtProp.uintVal << " cycles";
             info_static.CycleCount = oss.str();
+            info_static.cycleCount = (int)vtProp.uintVal;
+            info_static.cycleCountValid = true;
         }
         else
         {
             info_static.CycleCount = "Unsupported";
+            log_bi::write("cycle count: firmware does not expose the CycleCount property");
         }
 
         VariantClear(&vtProp);
@@ -159,6 +167,7 @@ bool batteryinfo_bi::QueryBatteryCycleCount()
     else
     {
         info_static.CycleCount = "No data";
+        log_bi::write("cycle count: ROOT\\WMI BatteryCycleCount returned no instances");
     }
 
     pEnumerator->Release();
@@ -181,19 +190,51 @@ bool batteryinfo_bi::QueryBatteryInfo()
         return false;
 
     info_static.Chemistry = std::string((char *)bi.Chemistry, 4);
-    info_static.DesignedCapacity = std::to_string(bi.DesignedCapacity) + " mWh (" +
-                                   std::to_string(bi.DesignedCapacity / 1000.0) + " mW)";
-    info_static.FullChargedCapacity = std::to_string(bi.FullChargedCapacity) + " mWh (" +
-                                      std::to_string(bi.FullChargedCapacity / 1000.0) + " mW)";
-    info_static.DefaultAlert1 = std::to_string(bi.DefaultAlert1) + " mWh (" +
-                                std::to_string(bi.DefaultAlert1 / 1000.0) + " mW)";
-    info_static.DefaultAlert2 = std::to_string(bi.DefaultAlert2) + " mWh (" +
-                                std::to_string(bi.DefaultAlert2 / 1000.0) + " mW)";
 
-    if (bi.DesignedCapacity > 0)
+    bool relative = (bi.Capabilities & BATTERY_CAPACITY_RELATIVE) != 0;
+
+    info_static.capacityValid = !relative && bi.DesignedCapacity > 0 && bi.FullChargedCapacity > 0;
+    info_static.designedWh = bi.DesignedCapacity / 1000.0;
+    info_static.fullChargedWh = bi.FullChargedCapacity / 1000.0;
+    info_static.alert1Wh = bi.DefaultAlert1 / 1000.0;
+    info_static.alert2Wh = bi.DefaultAlert2 / 1000.0;
+    info_static.alertsValid = !relative && (bi.DefaultAlert1 > 0 || bi.DefaultAlert2 > 0);
+
+    char buf[64];
+
+    if (info_static.capacityValid)
     {
-        int wear = 100 - (bi.FullChargedCapacity * 100 / bi.DesignedCapacity);
-        info_static.WearLevel = std::to_string(wear) + "%";
+        snprintf(buf, sizeof(buf), "%.1f Wh", info_static.designedWh);
+        info_static.DesignedCapacity = buf;
+
+        snprintf(buf, sizeof(buf), "%.1f Wh", info_static.fullChargedWh);
+        info_static.FullChargedCapacity = buf;
+
+        snprintf(buf, sizeof(buf), "%.1f Wh", info_static.alert1Wh);
+        info_static.DefaultAlert1 = buf;
+
+        snprintf(buf, sizeof(buf), "%.1f Wh", info_static.alert2Wh);
+        info_static.DefaultAlert2 = buf;
+    }
+    else
+    {
+        info_static.DesignedCapacity = "Unknown";
+        info_static.FullChargedCapacity = "Unknown";
+        info_static.DefaultAlert1 = "Unknown";
+        info_static.DefaultAlert2 = "Unknown";
+    }
+
+    if (info_static.capacityValid)
+    {
+        double wear = 100.0 - (bi.FullChargedCapacity * 100.0) / bi.DesignedCapacity;
+        if (wear < 0.0)
+            wear = 0.0;
+
+        info_static.wearPercent = wear;
+        info_static.wearValid = true;
+
+        snprintf(buf, sizeof(buf), "%.0f%%", wear);
+        info_static.WearLevel = buf;
     }
     else
     {
@@ -215,23 +256,63 @@ bool batteryinfo_bi::QueryBatteryStatus()
 
     char buf[64];
 
-    snprintf(buf, sizeof(buf), "%.2f V", bs.Voltage / 1000.0);
-    info_1s.Voltage = buf;
+    info_1s.charging = (bs.PowerState & BATTERY_CHARGING) != 0;
+    info_1s.discharging = (bs.PowerState & BATTERY_DISCHARGING) != 0;
+    info_1s.onLine = (bs.PowerState & BATTERY_POWER_ON_LINE) != 0;
 
-    snprintf(buf, sizeof(buf), "%.2f W", (double)(LONG)bs.Rate / 1000.0);
-    info_1s.Rate = buf;
+    info_1s.voltageValid = bs.Voltage != BATTERY_UNKNOWN_VOLTAGE;
+    if (info_1s.voltageValid)
+    {
+        info_1s.voltageV = bs.Voltage / 1000.0;
+        snprintf(buf, sizeof(buf), "%.2f V", info_1s.voltageV);
+        info_1s.Voltage = buf;
+    }
+    else
+    {
+        info_1s.Voltage = "Unknown";
+    }
+
+    info_1s.rateValid = bs.Rate != (ULONG)BATTERY_UNKNOWN_RATE;
+    if (info_1s.rateValid)
+    {
+        info_1s.rateW = (double)(LONG)bs.Rate / 1000.0;
+        snprintf(buf, sizeof(buf), "%.2f W", info_1s.rateW);
+        info_1s.Rate = buf;
+    }
+    else
+    {
+        info_1s.Rate = "Unknown";
+    }
 
     info_1s.PowerState =
-        (bs.PowerState & BATTERY_CHARGING) ? "Charging" : (bs.PowerState & BATTERY_DISCHARGING) ? "Discharging"
-                                                                                                : "Idle";
+        info_1s.charging ? "Charging" : info_1s.discharging ? "Discharging"
+                                                            : "Idle";
 
-    snprintf(buf, sizeof(buf), "%.2f Wh", bs.Capacity / 1000.0);
-    info_1s.RemainingCapacity = buf;
-
-    if (bi.FullChargedCapacity > 0)
+    info_1s.remainingValid = bs.Capacity != BATTERY_UNKNOWN_CAPACITY && info_static.capacityValid;
+    if (info_1s.remainingValid)
     {
-        snprintf(buf, sizeof(buf), "%.2f%%", (bs.Capacity * 100.0) / bi.FullChargedCapacity);
+        info_1s.remainingWh = bs.Capacity / 1000.0;
+        snprintf(buf, sizeof(buf), "%.2f Wh", info_1s.remainingWh);
+        info_1s.RemainingCapacity = buf;
+    }
+    else
+    {
+        info_1s.RemainingCapacity = "Unknown";
+    }
+
+    info_1s.chargeValid = bs.Capacity != BATTERY_UNKNOWN_CAPACITY && bi.FullChargedCapacity > 0;
+    if (info_1s.chargeValid)
+    {
+        info_1s.chargePercent = (bs.Capacity * 100.0) / bi.FullChargedCapacity;
+        if (info_1s.chargePercent > 100.0)
+            info_1s.chargePercent = 100.0;
+
+        snprintf(buf, sizeof(buf), "%.0f%%", info_1s.chargePercent);
         info_1s.ChargeLevel = buf;
+    }
+    else
+    {
+        info_1s.ChargeLevel = "Unknown";
     }
 
     return true;
@@ -239,50 +320,51 @@ bool batteryinfo_bi::QueryBatteryStatus()
 
 bool batteryinfo_bi::QueryBatteryRemaining()
 {
-    if (bi.FullChargedCapacity > 0)
+    info_10s.minutesToEmpty = -1;
+    info_10s.minutesToFull = -1;
+
+    if (bi.FullChargedCapacity == 0)
+        return true;
+
+    char buf[64];
+    LONG rate = (LONG)bs.Rate;
+    int rate_mW = (rate < 0) ? -rate : rate;
+    bool rateUsable = info_1s.rateValid && rate_mW > 0;
+
+    if (info_1s.discharging && rateUsable)
     {
-        char buf[64];
+        info_10s.minutesToEmpty = (int)(((ULONGLONG)bs.Capacity * 60) / rate_mW);
+        snprintf(buf, sizeof(buf), "%dh. %dm.",
+                 info_10s.minutesToEmpty / 60, info_10s.minutesToEmpty % 60);
+        info_10s.TimeRemaining = buf;
+    }
+    else if (info_1s.discharging)
+    {
+        info_10s.TimeRemaining = "Calculating...";
+    }
+    else
+    {
+        info_10s.TimeRemaining = "Not discharging";
+    }
 
-        if ((bs.PowerState & BATTERY_DISCHARGING) && bs.Rate != 0)
-        {
-            int rate_mW = abs(bs.Rate);
-            if (rate_mW > 0)
-            {
-                int remainingMinutes = (bs.Capacity * 60) / rate_mW;
-                snprintf(buf, sizeof(buf), "%dh. %dm.",
-                         remainingMinutes / 60, remainingMinutes % 60);
-                info_10s.TimeRemaining = buf;
-            }
-            else
-            {
-                info_10s.TimeRemaining = "Calculating...";
-            }
-        }
-        else
-        {
-            info_10s.TimeRemaining = "Not discharging";
-        }
+    if (info_1s.charging && rateUsable)
+    {
+        ULONG missing = (bi.FullChargedCapacity > bs.Capacity)
+                            ? (bi.FullChargedCapacity - bs.Capacity)
+                            : 0;
 
-        if ((bs.PowerState & BATTERY_CHARGING) && bs.Rate != 0)
-        {
-            int rate_mW = abs(bs.Rate);
-            int remainingCapacity = bi.FullChargedCapacity - bs.Capacity;
-            if (rate_mW > 0)
-            {
-                int timeToFullMinutes = (remainingCapacity * 60) / rate_mW;
-                snprintf(buf, sizeof(buf), "%dh. %dm.",
-                         timeToFullMinutes / 60, timeToFullMinutes % 60);
-                info_10s.TimeToFullCharge = buf;
-            }
-            else
-            {
-                info_10s.TimeToFullCharge = "Calculating...";
-            }
-        }
-        else
-        {
-            info_10s.TimeToFullCharge = "Not Charging";
-        }
+        info_10s.minutesToFull = (int)(((ULONGLONG)missing * 60) / rate_mW);
+        snprintf(buf, sizeof(buf), "%dh. %dm.",
+                 info_10s.minutesToFull / 60, info_10s.minutesToFull % 60);
+        info_10s.TimeToFullCharge = buf;
+    }
+    else if (info_1s.charging)
+    {
+        info_10s.TimeToFullCharge = "Calculating...";
+    }
+    else
+    {
+        info_10s.TimeToFullCharge = "Not charging";
     }
 
     return true;

@@ -14,6 +14,10 @@
 #define APP_TASK_NAME L"Kestrel Autostart"
 #define APP_RUN_VALUE "Kestrel"
 
+#define APP_REPO_URL "https://github.com/semiloker/Kestrel"
+#define APP_ISSUES_URL "https://github.com/semiloker/Kestrel/issues"
+#define APP_LICENCE_URL "https://github.com/semiloker/Kestrel/blob/main/LICENSE"
+
 #define APP_VERSION_STRING "1.2.0.0"
 #define APP_VERSION_MAJOR 1
 #define APP_VERSION_MINOR 2

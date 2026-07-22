@@ -95,6 +95,8 @@ public:
     void UpdatePosition();
     void ForceTopMost();
 
+    const D2D1_COLOR_F &resolveColor(hud_color_bi c) const;
+
     static LRESULT CALLBACK StaticWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 private:
@@ -109,8 +111,6 @@ private:
     void drawOneGraph(hud_graph_id_bi group, float top, float axisY);
     void drawSeries(const hud_series_bi &series, double scaleMax,
                     float top, float axisY, const D2D1_COLOR_F &color);
-
-    const D2D1_COLOR_F &resolveColor(hud_color_bi c) const;
 
     ID2D1Factory *pFactory = nullptr;
     ID2D1DCRenderTarget *pRT = nullptr;

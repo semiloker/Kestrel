@@ -16,6 +16,7 @@
 #include "resource_usage_bi.h"
 #include "etw_bi.h"
 #include "settings_bi.h"
+#include "update_bi.h"
 
 class win_bi
 {
@@ -51,7 +52,11 @@ private:
     void OnMouseMove(WPARAM wParam, LPARAM lParam);
     void OnMouseWheel(WPARAM wParam, LPARAM lParam);
     void OnLeftButtonDown(WPARAM wParam, LPARAM lParam);
+    void OnLeftButtonUp(WPARAM wParam, LPARAM lParam);
     void OnRightButtonDown(WPARAM wParam, LPARAM lParam);
+    bool OnSetCursor();
+    void OnUpdateNotify();
+    POINT ClientToDip(LPARAM lParam) const;
     void OnTimer(WPARAM wParam);
     void OnSetFocus(HWND hwnd);
     void OnKillFocus(HWND hwnd);
@@ -65,6 +70,8 @@ private:
 
     void ToggleOverlay();
     void SaveSettings();
+    void RunAction(int action);
+    draw_batteryinfo_bi::diag_bi BuildDiagnostics() const;
 
     static const char szClassName[];
 
@@ -89,6 +96,7 @@ private:
     std::unique_ptr<draw_batteryinfo_bi> draw_bibi_bi;
     std::unique_ptr<overlay_bi> ov_bi;
     std::unique_ptr<etw_bi> etwTrace;
+    std::unique_ptr<update_bi> updater;
 
     settings_bi settings;
 
