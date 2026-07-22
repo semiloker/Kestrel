@@ -14,6 +14,14 @@ in an always-on-top overlay you can keep open while you play.
 [![Release](https://img.shields.io/github/v/release/semiloker/Kestrel?sort=semver)](https://github.com/semiloker/Kestrel/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+<br>
+
+<img src="assets/graph.png" alt="The Kestrel overlay in use" width="330">
+
+<sub>The overlay, showing metrics grouped by unit with an independently scaled
+graph per group. Frame rows read as dashes here because this capture was taken
+without administrator rights.</sub>
+
 </div>
 
 ---
