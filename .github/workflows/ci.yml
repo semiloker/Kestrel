@@ -25,7 +25,7 @@ jobs:
             prefix: mingw-w64-ucrt-x86_64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up MSYS2
         id: msys2
@@ -132,7 +132,7 @@ jobs:
     name: Warnings are errors
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up MSYS2
         id: msys2
@@ -156,7 +156,7 @@ jobs:
     name: Project style
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
@@ -169,7 +169,7 @@ jobs:
     name: clang-tidy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install clang-tidy
         run: sudo apt-get update && sudo apt-get install -y clang-tidy
@@ -182,7 +182,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install cppcheck
         run: sudo apt-get update && sudo apt-get install -y cppcheck
@@ -205,7 +205,7 @@ jobs:
     name: Spelling
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: codespell-project/actions-codespell@v2
         with:
@@ -216,7 +216,7 @@ jobs:
     name: Logo is reproducible
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
@@ -251,7 +251,7 @@ jobs:
     name: Documentation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Local links in README must resolve
         run: |
