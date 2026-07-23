@@ -18,6 +18,8 @@ namespace autostart_bi
 
     bool taskExists();
 
+    bool taskPointsToThisExe();
+
     bool setMode(mode_bi mode);
 
     bool runTask();
