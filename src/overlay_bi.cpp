@@ -753,7 +753,7 @@ void overlay_bi::Render()
 
     BLENDFUNCTION blend = {};
     blend.BlendOp = AC_SRC_OVER;
-    blend.SourceConstantAlpha = 255;
+    blend.SourceConstantAlpha = (BYTE)overlayAlpha;
     blend.AlphaFormat = AC_SRC_ALPHA;
 
     HDC screenDC = GetDC(NULL);

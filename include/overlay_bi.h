@@ -79,10 +79,13 @@ public:
     HWND g_hwnd = NULL;
 
     bool show_on_screen_display = false;
+    bool autoHideOverlay = false;
+    bool overlayAutoHidden = false;
 
     corner_bi corner = CORNER_TOP_RIGHT;
     int margin = 20;
     int refreshMs = HUD_SAMPLE_INTERVAL_MS;
+    int overlayAlpha = 255;
 
     void setScale(int percent);
     int getScale() const { return hudScale; }

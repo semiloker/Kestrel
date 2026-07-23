@@ -1036,6 +1036,10 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         r = {L"Charger deficit warning", &ov->hud.showChargerDeficit, nullptr, MC_NONE,
              bi->present, L"Warns when the charger cannot keep up (Chg:)"};
         out.push_back(r);
+        r = {L"Power flow graph", &ov->hud.metrics[HUD_M_BATTERYD].show,
+             &ov->hud.metrics[HUD_M_BATTERYD].graphed, MC_POWER, bi->present,
+             L"Battery charge/discharge watts (Bat:)"};
+        out.push_back(r);
         break;
 
     case GROUP_MEMORY:
@@ -1078,6 +1082,9 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         out.push_back(r);
         r = {L"Exit on ESC", &ru->exit_on_key_esc, nullptr, MC_NONE, true,
              L"Close the window when you press Escape"};
+        out.push_back(r);
+        r = {L"Auto-hide overlay", &ov->autoHideOverlay, nullptr, MC_NONE, true,
+             L"Only show the overlay while a game or fullscreen app is running"};
         out.push_back(r);
         break;
     }
@@ -2311,7 +2318,7 @@ void draw_batteryinfo_bi::drawAppearanceTab(ID2D1HwndRenderTarget *pRT, init_dwr
 
     y += 145.0f + CARD_GAP;
 
-    card(L, y, R, y + 188.0f);
+    card(L, y, R, y + 246.0f);
     txt(dw->pTextFormatValue, IX, y + 16.0f, IX + 300.0f, y + 34.0f, pal.text,
         L"Refresh rate");
     txt(dw->pTextFormatMicro, IX, y + 36.0f, IX + 340.0f, y + 51.0f, pal.faint,
@@ -2409,6 +2416,37 @@ void draw_batteryinfo_bi::drawAppearanceTab(ID2D1HwndRenderTarget *pRT, init_dwr
     line(plusX + 9.0f, stepY + 15.0f, plusX + 21.0f, stepY + 15.0f, pal.text, 1.6f);
     line(plusX + 15.0f, stepY + 9.0f, plusX + 15.0f, stepY + 21.0f, pal.text, 1.6f);
     pushHit(D2D1::RectF(plusX, stepY, plusX + 30.0f, stepY + 30.0f), HIT_MARGIN, 1, nullptr);
+
+    line(IX, y + 66.0f, IR, y + 66.0f, pal.border, 1.0f);
+
+    y += 58.0f;
+
+    txt(dw->pTextFormatValue, IX, y + 16.0f, IX + 300.0f, y + 34.0f, pal.text,
+        L"Overlay opacity");
+    txt(dw->pTextFormatMicro, IX, y + 36.0f, IX + 340.0f, y + 51.0f, pal.faint,
+        L"Transparency of the in-game panel");
+
+    float alStepY = y + 21.0f;
+    float alMinusX = IR - 108.0f;
+    float alPlusX = IR - 30.0f;
+
+    if (isHovered(HIT_ALPHA, -1))
+        hoverFill(alMinusX, alStepY, alMinusX + 30.0f, alStepY + 30.0f, BTN_R);
+
+    strokeRR(alMinusX, alStepY, alMinusX + 30.0f, alStepY + 30.0f, BTN_R, pal.border, 1.0f);
+    line(alMinusX + 9.0f, alStepY + 15.0f, alMinusX + 21.0f, alStepY + 15.0f, pal.text, 1.6f);
+    pushHit(D2D1::RectF(alMinusX, alStepY, alMinusX + 30.0f, alStepY + 30.0f), HIT_ALPHA, -1, nullptr);
+
+    txt(dw->pTextFormatSmall, IR - 74.0f, alStepY, IR - 32.0f, alStepY + 30.0f, pal.text,
+        wfmt(L"%d%%", ov ? (ov->overlayAlpha * 100 / 255) : 100), DWRITE_TEXT_ALIGNMENT_CENTER);
+
+    if (isHovered(HIT_ALPHA, 1))
+        hoverFill(alPlusX, alStepY, alPlusX + 30.0f, alStepY + 30.0f, BTN_R);
+
+    strokeRR(alPlusX, alStepY, alPlusX + 30.0f, alStepY + 30.0f, BTN_R, pal.border, 1.0f);
+    line(alPlusX + 9.0f, alStepY + 15.0f, alPlusX + 21.0f, alStepY + 15.0f, pal.text, 1.6f);
+    line(alPlusX + 15.0f, alStepY + 9.0f, alPlusX + 15.0f, alStepY + 21.0f, pal.text, 1.6f);
+    pushHit(D2D1::RectF(alPlusX, alStepY, alPlusX + 30.0f, alStepY + 30.0f), HIT_ALPHA, 1, nullptr);
 
     y += 72.0f + PAD;
 
@@ -2721,6 +2759,20 @@ draw_batteryinfo_bi::click_result_bi draw_batteryinfo_bi::handleClick(POINT curs
                     ov->margin = 200;
 
                 ov->UpdatePosition();
+                result.needsSave = true;
+            }
+            break;
+
+        case HIT_ALPHA:
+            if (ov)
+            {
+                int step = h.index * 25;
+                int newAlpha = ov->overlayAlpha + step;
+                if (newAlpha < 25)
+                    newAlpha = 25;
+                if (newAlpha > 255)
+                    newAlpha = 255;
+                ov->overlayAlpha = newAlpha;
                 result.needsSave = true;
             }
             break;

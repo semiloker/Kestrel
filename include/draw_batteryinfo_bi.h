@@ -46,6 +46,8 @@ public:
         HIT_REFRESH,
         HIT_SCALE,
         HIT_MEMUNIT,
+        HIT_ALPHA,
+        HIT_AUTOHIDE,
         HIT_CAPTURE_RUN,
         HIT_USERPRESET_APPLY,
         HIT_USERPRESET_SAVE,

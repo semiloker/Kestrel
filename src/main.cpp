@@ -7,6 +7,7 @@
 #include "app_identity_bi.h"
 
 #include <cstring>
+#include <cmath>
 
 const char win_bi::szClassName[] = APP_WINDOW_CLASS;
 
@@ -781,6 +782,10 @@ void win_bi::UpdateOverlayHud()
     if (snapGpu.gpuPowerAvailable)
         ov_bi->hud.push(HUD_M_GPUW, snapGpu.gpuPowerW);
 
+    ov_bi->hud.metrics[HUD_M_BATTERYD].available = bi_bi->present && bi_bi->info_1s.rateValid;
+    if (bi_bi->present && bi_bi->info_1s.rateValid)
+        ov_bi->hud.push(HUD_M_BATTERYD, fabs(bi_bi->info_1s.rateW));
+
     ov_bi->hud.push(HUD_M_CPU, snapCpu.UsageValue);
     ov_bi->hud.push(HUD_M_GPU, snapGpu.gpuLoadValue);
     ov_bi->hud.push(HUD_M_RAM, snapRam.loadValue);
@@ -1164,10 +1169,56 @@ void win_bi::OnTimer(WPARAM wParam)
         break;
 
     case 3:
-        if (ov_bi && (ov_bi->show_on_screen_display || capture.active()))
-            UpdateOverlayHud();
+        if (ov_bi)
+        {
+            if (ov_bi->autoHideOverlay)
+            {
+                HWND fg = GetForegroundWindow();
+                bool gameRunning = false;
+
+                if (fg)
+                {
+                    RECT wr;
+                    if (GetWindowRect(fg, &wr))
+                    {
+                        int sw = GetSystemMetrics(SM_CXSCREEN);
+                        int sh = GetSystemMetrics(SM_CYSCREEN);
+                        gameRunning = (wr.right - wr.left) >= sw &&
+                                      (wr.bottom - wr.top) >= sh;
+                    }
+                }
+
+                bool wantShow = gameRunning && ov_bi->show_on_screen_display;
+
+                if (wantShow && ov_bi->overlayAutoHidden)
+                {
+                    ov_bi->overlayAutoHidden = false;
+                    ShowWindow(ov_bi->g_hwnd, SW_SHOWNOACTIVATE);
+                }
+                else if (!wantShow && !ov_bi->overlayAutoHidden && ov_bi->g_hwnd &&
+                         IsWindowVisible(ov_bi->g_hwnd))
+                {
+                    ov_bi->overlayAutoHidden = true;
+                    ShowWindow(ov_bi->g_hwnd, SW_HIDE);
+                }
+            }
+            else if (ov_bi->overlayAutoHidden)
+            {
+                ov_bi->overlayAutoHidden = false;
+                if (ov_bi->g_hwnd)
+                    ShowWindow(ov_bi->g_hwnd, SW_SHOWNOACTIVATE);
+                ov_bi->Render();
+            }
+
+            if (ov_bi->show_on_screen_display || capture.active())
+                UpdateOverlayHud();
+            else
+                collectFrames();
+        }
         else
+        {
             collectFrames();
+        }
         break;
     }
 }

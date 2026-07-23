@@ -140,6 +140,13 @@ hud_bi::hud_bi()
     metrics[HUD_M_COMMIT].color = HUD_COLOR_GREEN;
     metrics[HUD_M_COMMIT].graph = HUD_G_MEMORY;
     metrics[HUD_M_COMMIT].graphed = true;
+
+    metrics[HUD_M_BATTERYD].label = "Bat:";
+    metrics[HUD_M_BATTERYD].unit = "W";
+    metrics[HUD_M_BATTERYD].color = HUD_COLOR_CYAN;
+    metrics[HUD_M_BATTERYD].graph = HUD_G_BATTERY;
+    metrics[HUD_M_BATTERYD].show = false;
+    metrics[HUD_M_BATTERYD].graphed = true;
 }
 
 void hud_bi::initStaticInfo(const std::string &adapterName)
@@ -646,6 +653,26 @@ void hud_bi::buildLayoutInto(std::vector<hud_element_bi> &out) const
         fmtLeftNum(left, sizeof(left), "Chg:", chargerDeficitW, 1, "W");
         fmtRightPhrase(right, sizeof(right), "charger short");
         pushRow(out, n, left, right, HUD_COLOR_RED);
+    }
+
+    for (int i = 0; i < HUD_M_COUNT; ++i)
+    {
+        const hud_metric_bi &m = metrics[i];
+        if (m.graph != HUD_G_BATTERY || !m.show)
+            continue;
+
+        formatMetricLeft(m, left, sizeof(left));
+        formatMetricRight(m, right, sizeof(right));
+        pushRow(out, n, left, right, m.color);
+    }
+
+    if (graphHasContent(HUD_G_BATTERY))
+    {
+        hud_element_bi &el = nextElement(out, n);
+        el.kind = HUD_EL_GRAPH;
+        el.graph = HUD_G_BATTERY;
+        el.row.left.clear();
+        el.row.right.clear();
     }
 
     for (size_t i = 0; i < extraRows.size(); ++i)

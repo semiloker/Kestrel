@@ -79,6 +79,7 @@ enum hud_metric_id_bi
     HUD_M_COMMIT,
     HUD_M_CPUW,
     HUD_M_GPUW,
+    HUD_M_BATTERYD,
     HUD_M_COUNT
 };
 
@@ -89,6 +90,7 @@ enum hud_graph_id_bi
     HUD_G_PERCENT,
     HUD_G_MEMORY,
     HUD_G_POWER,
+    HUD_G_BATTERY,
     HUD_G_COUNT
 };
 

@@ -16,7 +16,7 @@ namespace
     const char *SETTINGS_FILE = "settings.ini";
 
     const char *METRIC_KEYS[HUD_M_COUNT] = {
-        "fps", "pre", "gpums", "cpu", "gpu", "ram", "commit", "cpuw", "gpuw"};
+        "fps", "pre", "gpums", "cpu", "gpu", "ram", "commit", "cpuw", "gpuw", "batteryd"};
 
     void trim(std::string &s)
     {
@@ -205,6 +205,8 @@ void settings_bi::applyTo(resource_usage_bi *ru, overlay_bi *ov,
         ov->show_on_screen_display = getBool("hud.enabled", ov->show_on_screen_display);
         ov->margin = getInt("hud.margin", ov->margin);
         ov->setScale(getInt("hud.scale", ov->getScale()));
+        ov->overlayAlpha = getInt("hud.alpha", ov->overlayAlpha);
+        ov->autoHideOverlay = getBool("hud.autoHide", ov->autoHideOverlay);
 
         int refresh = getInt("hud.refreshMs", ov->refreshMs);
         if (refresh >= 30 && refresh <= 2000)
@@ -295,6 +297,8 @@ void settings_bi::collectFrom(const resource_usage_bi *ru, const overlay_bi *ov,
         setBool("hud.enabled", ov->show_on_screen_display);
         setInt("hud.margin", ov->margin);
         setInt("hud.scale", ov->getScale());
+        setInt("hud.alpha", ov->overlayAlpha);
+        setBool("hud.autoHide", ov->autoHideOverlay);
         setInt("hud.refreshMs", ov->refreshMs);
         setInt("hud.corner", (int)ov->corner);
 
