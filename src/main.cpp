@@ -1277,7 +1277,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     bool fromTask = lpCmdLine && strstr(lpCmdLine, autostart_bi::ARG_FROM_TASK) != NULL;
 
-    if (!fromTask && !autostart_bi::isElevated() && autostart_bi::taskExists())
+    if (!fromTask && !autostart_bi::isElevated() && autostart_bi::taskPointsToThisExe())
     {
         log_bi::write("not elevated but task exists, relaunching through Task Scheduler");
         if (autostart_bi::runTask())
