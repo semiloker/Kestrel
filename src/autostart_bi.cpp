@@ -408,6 +408,61 @@ bool autostart_bi::taskExists()
     return SUCCEEDED(hr);
 }
 
+bool autostart_bi::taskPointsToThisExe()
+{
+    const std::wstring wexe = widen(paths_bi::exePath());
+    if (wexe.empty())
+        return false;
+
+    com_scope_bi com;
+
+    ITaskService *service = NULL;
+    ITaskFolder *folder = NULL;
+    if (!connectScheduler(&service, &folder))
+        return false;
+
+    BSTR name = SysAllocString(TASK_NAME);
+    IRegisteredTask *task = NULL;
+    folder->GetTask(name, &task);
+    SysFreeString(name);
+
+    bool match = false;
+    if (task)
+    {
+        ITaskDefinition *def = NULL;
+        if (SUCCEEDED(task->get_Definition(&def)) && def)
+        {
+            IActionCollection *actions = NULL;
+            if (SUCCEEDED(def->get_Actions(&actions)) && actions)
+            {
+                IAction *action = NULL;
+                if (SUCCEEDED(actions->get_Item(1, &action)) && action)
+                {
+                    IExecAction *exec = NULL;
+                    if (SUCCEEDED(action->QueryInterface(IID_IExecAction_bi, (void **)&exec)) && exec)
+                    {
+                        BSTR path = NULL;
+                        if (SUCCEEDED(exec->get_Path(&path)) && path)
+                        {
+                            match = (_wcsicmp(path, wexe.c_str()) == 0);
+                            SysFreeString(path);
+                        }
+                        exec->Release();
+                    }
+                    action->Release();
+                }
+                actions->Release();
+            }
+            def->Release();
+        }
+        task->Release();
+    }
+
+    folder->Release();
+    service->Release();
+    return match;
+}
+
 autostart_bi::mode_bi autostart_bi::current()
 {
     if (taskExists())
