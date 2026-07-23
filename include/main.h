@@ -28,7 +28,7 @@ public:
     ~win_bi() = default;
 
     bool Register();
-    bool Create(int nCmdShow);
+    bool Create(int nCmdShow, bool startInTray);
 
     void AddTrayIcon();
     void UpdateTrayTooltip();

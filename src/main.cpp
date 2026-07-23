@@ -56,7 +56,7 @@ bool win_bi::Register()
     return RegisterClassEx(&wc) != 0;
 }
 
-bool win_bi::Create(int nCmdShow)
+bool win_bi::Create(int nCmdShow, bool startInTray)
 {
     bi_bi.reset(new batteryinfo_bi());
     initd2d1_bi.reset(new init_d2d1_bi());
@@ -119,8 +119,16 @@ bool win_bi::Create(int nCmdShow)
         return false;
     }
 
-    ShowWindow(hwnd, nCmdShow);
-    UpdateWindow(hwnd);
+    if (startInTray && ru_bi && ru_bi->minimize_To_Tray)
+    {
+        AddTrayIcon();
+        log_bi::write("autostart: launched into the tray");
+    }
+    else
+    {
+        ShowWindow(hwnd, nCmdShow);
+        UpdateWindow(hwnd);
+    }
 
     return true;
 }
@@ -498,15 +506,15 @@ void win_bi::OnCreate(HWND hwnd)
     if (!RegisterHotKey(hwnd, HOTKEY_CAPTURE, MOD_CONTROL | MOD_ALT, 'B'))
         log_bi::writeErr(GetLastError(), "hotkey: Ctrl+Alt+B already taken by another app");
 
-    bool success = bi_bi->Initialize() && ru_bi->updateRam();
+    bool batteryOk = bi_bi->Initialize();
+    ru_bi->updateRam();
 
     ru_bi->startSampler(250);
 
-    if (!success)
-    {
-        log_bi::write("battery initialization failed (no battery, or driver refused IOCTL)");
-        MessageBoxA(NULL, "Battery initialization failed!", "Error", MB_ICONERROR);
-    }
+    if (!batteryOk)
+        log_bi::write("no battery present, or the driver refused the IOCTL");
+
+    draw_bibi_bi->processElevated = autostart_bi::isElevated();
 
     UpdateOverlayHud();
 }
@@ -640,6 +648,7 @@ void win_bi::ToggleCapture()
             lastCapture = summary;
             haveLastCapture = true;
             captureHistoryLoaded = false;
+            draw_bibi_bi->selectedRun = -1;
         }
     }
     else
@@ -768,6 +777,10 @@ void win_bi::UpdateOverlayHud()
     if (snapCpu.packagePowerAvailable)
         ov_bi->hud.push(HUD_M_CPUW, snapCpu.packagePowerW);
 
+    ov_bi->hud.metrics[HUD_M_GPUW].available = snapGpu.gpuPowerAvailable;
+    if (snapGpu.gpuPowerAvailable)
+        ov_bi->hud.push(HUD_M_GPUW, snapGpu.gpuPowerW);
+
     ov_bi->hud.push(HUD_M_CPU, snapCpu.UsageValue);
     ov_bi->hud.push(HUD_M_GPU, snapGpu.gpuLoadValue);
     ov_bi->hud.push(HUD_M_RAM, snapRam.loadValue);
@@ -780,6 +793,7 @@ void win_bi::UpdateOverlayHud()
     ov_bi->hud.metrics[HUD_M_RAM].show = ru_bi->ramInfo.show_dwMemoryLoad;
     ov_bi->hud.metrics[HUD_M_COMMIT].show = ru_bi->ramInfo.show_ullTotalPageFile;
     ov_bi->hud.metrics[HUD_M_CPUW].show = ru_bi->cpuInfo.show_packagePower;
+    ov_bi->hud.metrics[HUD_M_GPUW].show = ru_bi->gpuInfo.show_gpuPower;
     ov_bi->hud.showDevice = ru_bi->gpuInfo.show_gpuName;
     ov_bi->hud.showMem = ru_bi->ramInfo.show_ullTotalPhys;
 
@@ -790,46 +804,43 @@ void win_bi::UpdateOverlayHud()
 
     UpdateDerivedMetrics();
 
+    ov_bi->hud.showCpuName = ru_bi->cpuInfo.show_cpuName;
+    ov_bi->hud.showCpuArch = ru_bi->cpuInfo.show_architecture;
+    ov_bi->hud.cpuName = snapCpu.cpuName;
+    ov_bi->hud.cpuArch = snapCpu.architecture;
+
     ov_bi->hud.clearExtraRows();
-
-    if (ru_bi->cpuInfo.show_cpuName)
-        ov_bi->hud.addExtraRow(snapCpu.cpuName);
-
-    if (ru_bi->cpuInfo.show_architecture)
-        ov_bi->hud.addExtraRow("Arch: " + snapCpu.architecture);
 
     if (ru_bi->cpuInfo.show_CoreUsagePercents)
     {
         for (size_t i = 0; i < snapCpu.CoreUsagePercents.size(); ++i)
-        {
-            ov_bi->hud.addExtraRow("Core " + std::to_string(i + 1) + ": " +
+            ov_bi->hud.addExtraRow("Core " + std::to_string(i + 1),
                                    snapCpu.CoreUsagePercents[i]);
-        }
     }
 
     if (ru_bi->ramInfo.show_ullAvailPhys)
-        ov_bi->hud.addExtraRow("Avail RAM: " + snapRam.ullAvailPhys);
+        ov_bi->hud.addExtraRow("Avail RAM", snapRam.ullAvailPhys);
     if (ru_bi->ramInfo.show_ullAvailPageFile)
-        ov_bi->hud.addExtraRow("Avail Page: " + snapRam.ullAvailPageFile);
+        ov_bi->hud.addExtraRow("Avail Page", snapRam.ullAvailPageFile);
     if (ru_bi->ramInfo.show_ullTotalVirtual)
-        ov_bi->hud.addExtraRow("Total Virt: " + snapRam.ullTotalVirtual);
+        ov_bi->hud.addExtraRow("Total Virt", snapRam.ullTotalVirtual);
     if (ru_bi->ramInfo.show_ullAvailVirtual)
-        ov_bi->hud.addExtraRow("Avail Virt: " + snapRam.ullAvailVirtual);
+        ov_bi->hud.addExtraRow("Avail Virt", snapRam.ullAvailVirtual);
     if (ru_bi->ramInfo.show_ullAvailExtendedVirtual)
-        ov_bi->hud.addExtraRow("Ext Virt: " + snapRam.ullAvailExtendedVirtual);
+        ov_bi->hud.addExtraRow("Ext Virt", snapRam.ullAvailExtendedVirtual);
 
     if (bi_bi->info_1s.Voltage_)
-        ov_bi->hud.addExtraRow("Voltage: " + bi_bi->info_1s.Voltage);
+        ov_bi->hud.addExtraRow("Voltage", bi_bi->info_1s.Voltage);
     if (bi_bi->info_1s.Rate_)
-        ov_bi->hud.addExtraRow("Rate: " + bi_bi->info_1s.Rate);
+        ov_bi->hud.addExtraRow("Rate", bi_bi->info_1s.Rate);
     if (bi_bi->info_1s.PowerState_)
-        ov_bi->hud.addExtraRow("Power: " + bi_bi->info_1s.PowerState);
+        ov_bi->hud.addExtraRow("Power", bi_bi->info_1s.PowerState);
     if (bi_bi->info_1s.RemainingCapacity_)
-        ov_bi->hud.addExtraRow("Remaining: " + bi_bi->info_1s.RemainingCapacity);
+        ov_bi->hud.addExtraRow("Remaining", bi_bi->info_1s.RemainingCapacity);
     if (bi_bi->info_1s.ChargeLevel_)
-        ov_bi->hud.addExtraRow("Charge: " + bi_bi->info_1s.ChargeLevel);
+        ov_bi->hud.addExtraRow("Charge", bi_bi->info_1s.ChargeLevel);
     if (bi_bi->info_10s.TimeRemaining_)
-        ov_bi->hud.addExtraRow("Time Left: " + bi_bi->info_10s.TimeRemaining);
+        ov_bi->hud.addExtraRow("Time Left", bi_bi->info_10s.TimeRemaining);
 
     ov_bi->Render();
 }
@@ -1276,6 +1287,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     bool fromTask = lpCmdLine && strstr(lpCmdLine, autostart_bi::ARG_FROM_TASK) != NULL;
+    bool autostarted = fromTask ||
+                       (lpCmdLine && strstr(lpCmdLine, autostart_bi::ARG_AUTOSTART) != NULL);
 
     if (!fromTask && !autostart_bi::isElevated() && autostart_bi::taskExists())
     {
@@ -1301,7 +1314,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     int result = 0;
     {
         win_bi mainWindow(hInstance);
-        if (mainWindow.Register() && mainWindow.Create(nCmdShow))
+        if (mainWindow.Register() && mainWindow.Create(nCmdShow, autostarted))
         {
             result = (int)mainWindow.RunMessageLoop();
         }

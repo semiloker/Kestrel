@@ -1,7 +1,9 @@
 #include "overlay_bi.h"
 #include "app_identity_bi.h"
+#include "logger_bi.h"
 
 #include <vector>
+#include <cmath>
 
 static const char OVERLAY_CLASS_NAME[] = APP_OVERLAY_CLASS;
 
@@ -131,6 +133,53 @@ const D2D1_COLOR_F &overlay_bi::resolveColor(hud_color_bi c) const
     default:
         return theme.white;
     }
+}
+
+void overlay_bi::setScale(int percent)
+{
+    if (percent < 50)
+        percent = 50;
+    if (percent > 250)
+        percent = 250;
+
+    hudScale = percent;
+
+    float s = (float)percent / 100.0f;
+
+    layout.padLeft = 9.0f * s;
+    layout.padRight = 9.0f * s;
+    layout.padBottom = 17.0f * s;
+    layout.padTop = 16.0f * s;
+    layout.lineHeight = 16.4f * s;
+    layout.cornerRadius = 10.0f * s;
+    layout.graphHeight = 50.6f * s;
+    layout.graphGap = 13.0f * s;
+    layout.charAdvance = (223.0f / (float)HUD_MIN_COLUMNS) * s;
+    layout.graphTopNudge = -1.0f * s;
+    layout.axisStroke = 1.5f * s;
+    layout.graphStroke = 1.0f * s;
+    layout.gridStroke = 1.0f * s;
+
+    if (pBrush)
+    {
+        pBrush->Release();
+        pBrush = nullptr;
+    }
+    if (pTextFormat)
+    {
+        pTextFormat->Release();
+        pTextFormat = nullptr;
+    }
+    if (pRT)
+    {
+        pRT->Release();
+        pRT = nullptr;
+    }
+
+    releaseSurface();
+
+    traceRenders = 4;
+    log_bi::write("overlay scale set to %d%%", hudScale);
 }
 
 bool overlay_bi::ensureGraphics()
@@ -319,16 +368,16 @@ bool overlay_bi::ensureSurface(int width, int height)
     panelW = width;
     panelH = height;
 
+    int allocW = width + 32;
+    int allocH = height + 64;
+
     if (memDC && dib && surfaceW >= width && surfaceH >= height &&
-        surfaceW <= width * 2 && surfaceH <= height * 2)
+        surfaceW <= allocW * 2 && surfaceH <= allocH * 2)
     {
         return true;
     }
 
     releaseSurface();
-
-    width += 32;
-    height += 64;
 
     HDC screenDC = GetDC(NULL);
     if (!screenDC)
@@ -342,8 +391,8 @@ bool overlay_bi::ensureSurface(int width, int height)
 
     BITMAPINFO bmi = {};
     bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = width;
-    bmi.bmiHeader.biHeight = -height;
+    bmi.bmiHeader.biWidth = allocW;
+    bmi.bmiHeader.biHeight = -allocH;
     bmi.bmiHeader.biPlanes = 1;
     bmi.bmiHeader.biBitCount = 32;
     bmi.bmiHeader.biCompression = BI_RGB;
@@ -357,8 +406,11 @@ bool overlay_bi::ensureSurface(int width, int height)
     }
 
     oldBitmap = (HBITMAP)SelectObject(memDC, dib);
-    surfaceW = width;
-    surfaceH = height;
+    surfaceW = allocW;
+    surfaceH = allocH;
+
+    panelW = width;
+    panelH = height;
 
     return true;
 }
@@ -521,14 +573,29 @@ void overlay_bi::drawOneGraph(hud_graph_id_bi group, float top, float axisY)
                   pBrush, layout.axisStroke);
 
     double scaleMax = 0.0;
-    for (int i = 0; i < HUD_M_COUNT; ++i)
+
+    if (group == HUD_G_PERCENT || group == HUD_G_MEMORY)
     {
-        const hud_metric_bi &m = hud.metrics[i];
-        if (m.graph == group && m.show && m.graphed && m.available &&
-            m.series.maximum() > scaleMax)
+        scaleMax = 100.0;
+    }
+    else
+    {
+        for (int i = 0; i < HUD_M_COUNT; ++i)
         {
-            scaleMax = m.series.maximum();
+            const hud_metric_bi &m = hud.metrics[i];
+            if (m.graph == group && m.show && m.graphed && m.available &&
+                m.series.maximum() > scaleMax)
+            {
+                scaleMax = m.series.maximum();
+            }
         }
+
+        double headroom = scaleMax * 1.2;
+        if (headroom < 1.0)
+            headroom = 1.0;
+
+        double step = pow(10.0, floor(log10(headroom)));
+        scaleMax = ceil(headroom / step) * step;
     }
 
     if (scaleMax < 1.0)
@@ -544,17 +611,33 @@ void overlay_bi::drawOneGraph(hud_graph_id_bi group, float top, float axisY)
 
 void overlay_bi::Render()
 {
+    bool trace = traceRenders > 0;
+    if (trace)
+        --traceRenders;
+
     if (!g_hwnd || !IsWindow(g_hwnd))
+    {
+        if (trace)
+            log_bi::write("overlay trace: no window");
         return;
+    }
 
     if (!ensureGraphics())
+    {
+        if (trace)
+            log_bi::write("overlay trace: ensureGraphics failed");
         return;
+    }
 
     hud.buildLayoutInto(layoutScratch);
 
     const std::vector<hud_element_bi> &elements = layoutScratch;
     if (elements.empty())
+    {
+        if (trace)
+            log_bi::write("overlay trace: layout empty");
         return;
+    }
 
     int columns = hud.columnsFor(elements);
 
@@ -564,18 +647,33 @@ void overlay_bi::Render()
     int w = (int)(curPanelW + 0.5f);
     int h = (int)(curPanelH + 0.5f);
 
+    if (trace)
+        log_bi::write("overlay trace: scale=%d cols=%d panel=%dx%d font=%.2f", hudScale, columns,
+                      w, h, fontSize);
+
     if (!ensureSurface(w, h))
+    {
+        if (trace)
+            log_bi::write("overlay trace: ensureSurface(%d,%d) failed", w, h);
         return;
+    }
 
     RECT rc = {0, 0, panelW, panelH};
-    if (FAILED(pRT->BindDC(memDC, &rc)))
+    HRESULT bindHr = pRT->BindDC(memDC, &rc);
+    if (FAILED(bindHr))
+    {
+        if (trace)
+            log_bi::write("overlay trace: BindDC failed 0x%08lX", (unsigned long)bindHr);
         return;
+    }
 
     if (!pBrush)
     {
         if (FAILED(pRT->CreateSolidColorBrush(theme.white, &pBrush)) || !pBrush)
         {
             pBrush = nullptr;
+            if (trace)
+                log_bi::write("overlay trace: CreateSolidColorBrush failed");
             return;
         }
     }
@@ -628,8 +726,11 @@ void overlay_bi::Render()
         }
     }
 
-    if (FAILED(pRT->EndDraw()))
+    HRESULT endHr = pRT->EndDraw();
+    if (FAILED(endHr))
     {
+        if (trace)
+            log_bi::write("overlay trace: EndDraw failed 0x%08lX", (unsigned long)endHr);
         releaseGraphics();
         return;
     }
@@ -658,9 +759,17 @@ void overlay_bi::Render()
     HDC screenDC = GetDC(NULL);
     if (screenDC)
     {
-        UpdateLayeredWindow(g_hwnd, screenDC, &ptDst, &size,
-                            memDC, &ptSrc, 0, &blend, ULW_ALPHA);
+        BOOL ulwOk = UpdateLayeredWindow(g_hwnd, screenDC, &ptDst, &size,
+                                         memDC, &ptSrc, 0, &blend, ULW_ALPHA);
+        if (trace)
+            log_bi::write("overlay trace: ULW pos=%d,%d size=%dx%d ok=%d err=%lu",
+                          (int)ptDst.x, (int)ptDst.y, (int)size.cx, (int)size.cy,
+                          (int)ulwOk, (unsigned long)(ulwOk ? 0 : GetLastError()));
         ReleaseDC(NULL, screenDC);
+    }
+    else if (trace)
+    {
+        log_bi::write("overlay trace: GetDC(NULL) failed");
     }
 
     ForceTopMost();

@@ -28,6 +28,7 @@ namespace autostart_bi
     extern const char *ARG_REMOVE_TASK;
 
     extern const char *ARG_FROM_TASK;
+    extern const char *ARG_AUTOSTART;
 }
 
 #endif

@@ -10,6 +10,7 @@
 const char *autostart_bi::ARG_INSTALL_TASK = "--install-task";
 const char *autostart_bi::ARG_REMOVE_TASK = "--remove-task";
 const char *autostart_bi::ARG_FROM_TASK = "--from-task";
+const char *autostart_bi::ARG_AUTOSTART = "--autostart";
 
 namespace
 {
@@ -342,7 +343,7 @@ namespace
         if (RegOpenKeyExA(HKEY_CURRENT_USER, RUN_KEY, 0, KEY_WRITE, &key) != ERROR_SUCCESS)
             return false;
 
-        std::string quoted = "\"" + exe + "\"";
+        std::string quoted = "\"" + exe + "\" " + autostart_bi::ARG_AUTOSTART;
 
         LONG r = RegSetValueExA(key, RUN_VALUE, 0, REG_SZ,
                                 (const BYTE *)quoted.c_str(),

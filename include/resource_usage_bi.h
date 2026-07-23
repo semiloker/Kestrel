@@ -140,9 +140,14 @@ public:
         double vramTotalMB = 0.0;
         bool vramAvailable = false;
 
+        std::string gpuPower;
+        double gpuPowerW = 0.0;
+        bool gpuPowerAvailable = false;
+
         bool show_gpuName = true;
         bool show_gpuLoad = true;
         bool show_vram = false;
+        bool show_gpuPower = false;
     };
 
     CpuInfo cpuInfo;
@@ -150,6 +155,15 @@ public:
     GpuInfo gpuInfo;
     std::vector<DiskInfo> disksInfo;
     std::vector<NetworkInfo> networkInfo;
+
+    enum mem_unit_bi
+    {
+        MEM_UNIT_AUTO = 0,
+        MEM_UNIT_MB,
+        MEM_UNIT_GB
+    };
+
+    int memUnit = MEM_UNIT_AUTO;
 
     bool start_With_Windows = true;
     bool start_As_Admin = false;

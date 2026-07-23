@@ -44,6 +44,11 @@ public:
         HIT_CORNER,
         HIT_MARGIN,
         HIT_REFRESH,
+        HIT_SCALE,
+        HIT_MEMUNIT,
+        HIT_CAPTURE_RUN,
+        HIT_USERPRESET_APPLY,
+        HIT_USERPRESET_SAVE,
         HIT_ACTION
     };
 
@@ -142,6 +147,8 @@ public:
                          overlay_bi *ov, resource_usage_bi *ru, batteryinfo_bi *bi);
     void drawCaptureTab(ID2D1HwndRenderTarget *pRT, init_dwrite_bi *dw,
                         const capture_view_bi &cap);
+    float drawRunCard(init_dwrite_bi *dw, float L, float R, float y,
+                      const capture_bi::summary_bi &s, const wchar_t *title);
     void drawAppearanceTab(ID2D1HwndRenderTarget *pRT, init_dwrite_bi *dw, overlay_bi *ov);
     void drawAboutTab(ID2D1HwndRenderTarget *pRT, init_dwrite_bi *dw, const diag_bi &diag,
                       const update_view_bi &upd);
@@ -176,6 +183,16 @@ public:
 
     selected_option selectedTab = BATTERY_INFO;
 
+    bool processElevated = true;
+
+    int selectedRun = -1;
+
+    std::string userPreset[3];
+
+    std::string captureLayout(overlay_bi *ov, resource_usage_bi *ru, batteryinfo_bi *bi) const;
+    void applyLayout(const std::string &s, overlay_bi *ov, resource_usage_bi *ru,
+                     batteryinfo_bi *bi);
+
     float scrollOffsetY = 0.0f;
     float contentHeight = 0.0f;
     float viewHeight = 0.0f;
@@ -208,6 +225,7 @@ private:
         bool *graph;
         int color;
         bool available;
+        const wchar_t *desc;
     };
 
     void fillR(float l, float t, float r, float b, const D2D1_COLOR_F &c);
@@ -218,7 +236,8 @@ private:
     void line(float x1, float y1, float x2, float y2, const D2D1_COLOR_F &c, float width);
     void txt(IDWriteTextFormat *f, float l, float t, float r, float b,
              const D2D1_COLOR_F &c, const std::wstring &s,
-             DWRITE_TEXT_ALIGNMENT align = DWRITE_TEXT_ALIGNMENT_LEADING);
+             DWRITE_TEXT_ALIGNMENT align = DWRITE_TEXT_ALIGNMENT_LEADING,
+             bool clip = false);
 
     void bar(float l, float t, float w, float h, float fraction, const D2D1_COLOR_F &c);
     void card(float l, float t, float r, float b);

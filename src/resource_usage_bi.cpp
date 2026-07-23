@@ -5,10 +5,19 @@
 #include <cstring>
 #include <cwchar>
 
-static void formatMegabytes(std::string &out, ULONGLONG bytes)
+static void formatMegabytes(std::string &out, ULONGLONG bytes, int unit)
 {
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%llu MB", (unsigned long long)(bytes / DIV));
+    char buf[48];
+
+    bool useGb = (unit == resource_usage_bi::MEM_UNIT_GB) ||
+                 (unit == resource_usage_bi::MEM_UNIT_AUTO &&
+                  bytes >= (1024ULL * 1024ULL * 1024ULL));
+
+    if (useGb)
+        snprintf(buf, sizeof(buf), "%.2f GB", (double)bytes / (1024.0 * 1024.0 * 1024.0));
+    else
+        snprintf(buf, sizeof(buf), "%llu MB", (unsigned long long)(bytes / DIV));
+
     out = buf;
 }
 
@@ -20,7 +29,11 @@ bool resource_usage_bi::updateRam()
     if (!GlobalMemoryStatusEx(&statex))
         return false;
 
-    ramInfo.loadValue = static_cast<double>(statex.dwMemoryLoad);
+    if (statex.ullTotalPhys > 0)
+        ramInfo.loadValue =
+            (1.0 - (double)statex.ullAvailPhys / (double)statex.ullTotalPhys) * 100.0;
+    else
+        ramInfo.loadValue = static_cast<double>(statex.dwMemoryLoad);
 
     if (statex.ullTotalPageFile > 0)
     {
@@ -37,19 +50,19 @@ bool resource_usage_bi::updateRam()
     ramInfo.dwMemoryLoad = buf;
 
     if (ramInfo.show_ullTotalPhys)
-        formatMegabytes(ramInfo.ullTotalPhys, statex.ullTotalPhys);
+        formatMegabytes(ramInfo.ullTotalPhys, statex.ullTotalPhys, memUnit);
     if (ramInfo.show_ullAvailPhys)
-        formatMegabytes(ramInfo.ullAvailPhys, statex.ullAvailPhys);
+        formatMegabytes(ramInfo.ullAvailPhys, statex.ullAvailPhys, memUnit);
     if (ramInfo.show_ullTotalPageFile)
-        formatMegabytes(ramInfo.ullTotalPageFile, statex.ullTotalPageFile);
+        formatMegabytes(ramInfo.ullTotalPageFile, statex.ullTotalPageFile, memUnit);
     if (ramInfo.show_ullAvailPageFile)
-        formatMegabytes(ramInfo.ullAvailPageFile, statex.ullAvailPageFile);
+        formatMegabytes(ramInfo.ullAvailPageFile, statex.ullAvailPageFile, memUnit);
     if (ramInfo.show_ullTotalVirtual)
-        formatMegabytes(ramInfo.ullTotalVirtual, statex.ullTotalVirtual);
+        formatMegabytes(ramInfo.ullTotalVirtual, statex.ullTotalVirtual, memUnit);
     if (ramInfo.show_ullAvailVirtual)
-        formatMegabytes(ramInfo.ullAvailVirtual, statex.ullAvailVirtual);
+        formatMegabytes(ramInfo.ullAvailVirtual, statex.ullAvailVirtual, memUnit);
     if (ramInfo.show_ullAvailExtendedVirtual)
-        formatMegabytes(ramInfo.ullAvailExtendedVirtual, statex.ullAvailExtendedVirtual);
+        formatMegabytes(ramInfo.ullAvailExtendedVirtual, statex.ullAvailExtendedVirtual, memUnit);
 
     return true;
 }
@@ -581,6 +594,7 @@ bool resource_usage_bi::updateGpuMemory()
 bool resource_usage_bi::updateCpuPower()
 {
     cpuInfo.packagePowerAvailable = false;
+    gpuInfo.gpuPowerAvailable = false;
 
     if (!sharedCollected || powerCounter == NULL)
         return false;
@@ -608,6 +622,7 @@ bool resource_usage_bi::updateCpuPower()
         return false;
 
     double packageMilliwatts = -1.0;
+    double gpuMilliwatts = -1.0;
     std::string seen;
 
     for (DWORD i = 0; i < itemCount; ++i)
@@ -631,6 +646,15 @@ bool resource_usage_bi::updateCpuPower()
         if (items[i].FmtValue.CStatus != ERROR_SUCCESS)
             continue;
 
+        bool isGpu = (strstr(name, "gpu") || strstr(name, "graphics")) && !strstr(name, "cpu");
+
+        if (isGpu)
+        {
+            if (items[i].FmtValue.doubleValue > gpuMilliwatts)
+                gpuMilliwatts = items[i].FmtValue.doubleValue;
+            continue;
+        }
+
         if (!strstr(name, "_pkg") && !strstr(name, "package"))
             continue;
 
@@ -639,6 +663,16 @@ bool resource_usage_bi::updateCpuPower()
 
         if (items[i].FmtValue.doubleValue > packageMilliwatts)
             packageMilliwatts = items[i].FmtValue.doubleValue;
+    }
+
+    if (gpuMilliwatts >= 0.0)
+    {
+        gpuInfo.gpuPowerW = gpuMilliwatts / 1000.0;
+        gpuInfo.gpuPowerAvailable = true;
+
+        char gbuf[32];
+        snprintf(gbuf, sizeof(gbuf), "%.2f W", gpuInfo.gpuPowerW);
+        gpuInfo.gpuPower = gbuf;
     }
 
     if (packageMilliwatts < 0.0)

@@ -78,6 +78,7 @@ enum hud_metric_id_bi
     HUD_M_RAM,
     HUD_M_COMMIT,
     HUD_M_CPUW,
+    HUD_M_GPUW,
     HUD_M_COUNT
 };
 
@@ -164,6 +165,11 @@ public:
     double vramUsedMB = 0.0;
     double vramTotalMB = 0.0;
 
+    std::string cpuName;
+    std::string cpuArch;
+    bool showCpuName = false;
+    bool showCpuArch = false;
+
     void initStaticInfo(const std::string &adapterName);
 
     void updateForeground(HWND foreground);
@@ -174,7 +180,7 @@ public:
     void push(hud_metric_id_bi id, double value) { metrics[id].series.push(value); }
 
     void clearExtraRows();
-    void addExtraRow(const std::string &text);
+    void addExtraRow(const std::string &label, const std::string &value);
 
     std::vector<hud_element_bi> buildLayout() const;
 
@@ -192,7 +198,13 @@ private:
     std::string refreshLine;
     std::string apiLabel;
 
-    std::vector<std::string> extraRows;
+    struct extra_row_bi
+    {
+        std::string left;
+        std::string right;
+    };
+
+    std::vector<extra_row_bi> extraRows;
 
     double memUsedGB;
     double memTotalGB;

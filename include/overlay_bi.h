@@ -84,6 +84,9 @@ public:
     int margin = 20;
     int refreshMs = HUD_SAMPLE_INTERVAL_MS;
 
+    void setScale(int percent);
+    int getScale() const { return hudScale; }
+
     hud_bi hud;
     hud_layout_bi layout;
     hud_theme_bi theme;
@@ -118,6 +121,9 @@ private:
     IDWriteFactory *pDWrite = nullptr;
     IDWriteTextFormat *pTextFormat = nullptr;
     ID2D1SolidColorBrush *pBrush = nullptr;
+
+    int hudScale = 100;
+    int traceRenders = 0;
 
     float fontSize = 13.8f;
     float glyphTopOffset = 0.0f;

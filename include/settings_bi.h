@@ -18,10 +18,12 @@ public:
     bool getBool(const char *key, bool def) const;
     int getInt(const char *key, int def) const;
     float getFloat(const char *key, float def) const;
+    std::string getString(const char *key, const std::string &def) const;
 
     void setBool(const char *key, bool value);
     void setInt(const char *key, int value);
     void setFloat(const char *key, float value);
+    void setString(const char *key, const std::string &value);
 
     void applyTo(resource_usage_bi *ru, overlay_bi *ov, draw_batteryinfo_bi *draw,
                  batteryinfo_bi *bi) const;

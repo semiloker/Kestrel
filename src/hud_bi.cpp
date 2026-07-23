@@ -123,11 +123,17 @@ hud_bi::hud_bi()
     metrics[HUD_M_RAM].graph = HUD_G_MEMORY;
     metrics[HUD_M_RAM].graphed = true;
 
-    metrics[HUD_M_CPUW].label = "PWR:";
+    metrics[HUD_M_CPUW].label = "CPW:";
     metrics[HUD_M_CPUW].unit = "W";
     metrics[HUD_M_CPUW].color = HUD_COLOR_ORANGE;
     metrics[HUD_M_CPUW].graph = HUD_G_POWER;
     metrics[HUD_M_CPUW].show = true;
+
+    metrics[HUD_M_GPUW].label = "GPW:";
+    metrics[HUD_M_GPUW].unit = "W";
+    metrics[HUD_M_GPUW].color = HUD_COLOR_CYAN;
+    metrics[HUD_M_GPUW].graph = HUD_G_POWER;
+    metrics[HUD_M_GPUW].show = false;
 
     metrics[HUD_M_COMMIT].label = "Cmt:";
     metrics[HUD_M_COMMIT].unit = "%";
@@ -273,12 +279,15 @@ void hud_bi::clearExtraRows()
     extraRows.clear();
 }
 
-void hud_bi::addExtraRow(const std::string &text)
+void hud_bi::addExtraRow(const std::string &label, const std::string &value)
 {
-    if (text.size() > HUD_MAX_COLUMNS)
-        extraRows.push_back(text.substr(0, HUD_MAX_COLUMNS));
-    else
-        extraRows.push_back(text);
+    extra_row_bi row;
+    row.left = label.substr(0, HUD_MAX_COLUMNS);
+
+    size_t room = (label.size() + 1 < HUD_MAX_COLUMNS) ? (HUD_MAX_COLUMNS - label.size() - 1) : 0;
+    row.right = value.substr(0, room);
+
+    extraRows.push_back(row);
 }
 
 bool hud_bi::graphHasContent(hud_graph_id_bi g) const
@@ -398,12 +407,12 @@ static void fmtRightTotalPct(char *buf, size_t n, double total, int decimals, do
     char text[64];
     formatFixed(text, sizeof(text), total, decimals);
 
-    if (percent > 999.0)
-        percent = 999.0;
+    if (percent > 999.9)
+        percent = 999.9;
     if (percent < 0.0)
         percent = 0.0;
 
-    snprintf(buf, n, "[%6s %5.0f%%]", text, percent);
+    snprintf(buf, n, "[%6s %5.1f%%]", text, percent);
 }
 
 static void formatMetricLeft(const hud_metric_bi &m, char *buf, size_t n)
@@ -481,6 +490,12 @@ void hud_bi::buildLayoutInto(std::vector<hud_element_bi> &out) const
         fmtRight(right, sizeof(right), frames, "frames");
         pushRow(out, n, left, right, HUD_COLOR_RED);
     }
+
+    if (showCpuName && !cpuName.empty())
+        pushRow(out, n, cpuName, "", HUD_COLOR_WHITE);
+
+    if (showCpuArch && !cpuArch.empty())
+        pushRow(out, n, "Arch: " + cpuArch, "", HUD_COLOR_WHITE);
 
     if (showDevice)
         pushRow(out, n, deviceName, resolution, HUD_COLOR_WHITE);
@@ -634,7 +649,7 @@ void hud_bi::buildLayoutInto(std::vector<hud_element_bi> &out) const
     }
 
     for (size_t i = 0; i < extraRows.size(); ++i)
-        pushRow(out, n, extraRows[i].c_str(), "", HUD_COLOR_WHITE);
+        pushRow(out, n, extraRows[i].left, extraRows[i].right, HUD_COLOR_WHITE);
 
     out.resize(n);
 }

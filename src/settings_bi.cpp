@@ -16,7 +16,7 @@ namespace
     const char *SETTINGS_FILE = "settings.ini";
 
     const char *METRIC_KEYS[HUD_M_COUNT] = {
-        "fps", "pre", "gpums", "cpu", "gpu", "ram", "commit", "cpuw"};
+        "fps", "pre", "gpums", "cpu", "gpu", "ram", "commit", "cpuw", "gpuw"};
 
     void trim(std::string &s)
     {
@@ -124,9 +124,23 @@ float settings_bi::getFloat(const char *key, float def) const
     return (float)atof(it->second.c_str());
 }
 
+std::string settings_bi::getString(const char *key, const std::string &def) const
+{
+    std::map<std::string, std::string>::const_iterator it = values.find(key);
+    if (it == values.end())
+        return def;
+
+    return it->second;
+}
+
 void settings_bi::setBool(const char *key, bool value)
 {
     values[key] = value ? "1" : "0";
+}
+
+void settings_bi::setString(const char *key, const std::string &value)
+{
+    values[key] = value;
 }
 
 void settings_bi::setInt(const char *key, int value)
@@ -176,6 +190,11 @@ void settings_bi::applyTo(resource_usage_bi *ru, overlay_bi *ov,
         ru->gpuInfo.show_gpuName = getBool("gpu.name", ru->gpuInfo.show_gpuName);
         ru->gpuInfo.show_gpuLoad = getBool("gpu.load", ru->gpuInfo.show_gpuLoad);
         ru->gpuInfo.show_vram = getBool("gpu.vram", ru->gpuInfo.show_vram);
+        ru->gpuInfo.show_gpuPower = getBool("gpu.power", ru->gpuInfo.show_gpuPower);
+
+        int unit = getInt("mem.unit", ru->memUnit);
+        if (unit >= resource_usage_bi::MEM_UNIT_AUTO && unit <= resource_usage_bi::MEM_UNIT_GB)
+            ru->memUnit = unit;
 
         ru->minimize_To_Tray = getBool("app.minimizeToTray", ru->minimize_To_Tray);
         ru->exit_on_key_esc = getBool("app.exitOnEsc", ru->exit_on_key_esc);
@@ -185,6 +204,7 @@ void settings_bi::applyTo(resource_usage_bi *ru, overlay_bi *ov,
     {
         ov->show_on_screen_display = getBool("hud.enabled", ov->show_on_screen_display);
         ov->margin = getInt("hud.margin", ov->margin);
+        ov->setScale(getInt("hud.scale", ov->getScale()));
 
         int refresh = getInt("hud.refreshMs", ov->refreshMs);
         if (refresh >= 30 && refresh <= 2000)
@@ -214,6 +234,10 @@ void settings_bi::applyTo(resource_usage_bi *ru, overlay_bi *ov,
     {
         draw->setNightMode(getBool("ui.nightMode", draw->getNightMode()));
         draw->setSettingsGroup(getInt("ui.settingsGroup", draw->getSettingsGroup()));
+
+        draw->userPreset[0] = getString("ui.userpreset1", draw->userPreset[0]);
+        draw->userPreset[1] = getString("ui.userpreset2", draw->userPreset[1]);
+        draw->userPreset[2] = getString("ui.userpreset3", draw->userPreset[2]);
 
         const D2D1_COLOR_F &cur = draw->getAccentColor();
         D2D1_COLOR_F accent;
@@ -258,6 +282,9 @@ void settings_bi::collectFrom(const resource_usage_bi *ru, const overlay_bi *ov,
         setBool("gpu.name", ru->gpuInfo.show_gpuName);
         setBool("gpu.load", ru->gpuInfo.show_gpuLoad);
         setBool("gpu.vram", ru->gpuInfo.show_vram);
+        setBool("gpu.power", ru->gpuInfo.show_gpuPower);
+
+        setInt("mem.unit", ru->memUnit);
 
         setBool("app.minimizeToTray", ru->minimize_To_Tray);
         setBool("app.exitOnEsc", ru->exit_on_key_esc);
@@ -267,6 +294,7 @@ void settings_bi::collectFrom(const resource_usage_bi *ru, const overlay_bi *ov,
     {
         setBool("hud.enabled", ov->show_on_screen_display);
         setInt("hud.margin", ov->margin);
+        setInt("hud.scale", ov->getScale());
         setInt("hud.refreshMs", ov->refreshMs);
         setInt("hud.corner", (int)ov->corner);
 
@@ -295,5 +323,9 @@ void settings_bi::collectFrom(const resource_usage_bi *ru, const overlay_bi *ov,
         setFloat("ui.accent.r", accent.r);
         setFloat("ui.accent.g", accent.g);
         setFloat("ui.accent.b", accent.b);
+
+        setString("ui.userpreset1", draw->userPreset[0]);
+        setString("ui.userpreset2", draw->userPreset[1]);
+        setString("ui.userpreset3", draw->userPreset[2]);
     }
 }
