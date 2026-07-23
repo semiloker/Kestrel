@@ -1,0 +1,20 @@
+# Kestrel translation template (FEAT-08).
+#
+# Copy this to "<code>.lang" (e.g. de.lang, es.lang), translate the values,
+# put it next to kestrel.exe or in %APPDATA%\Kestrel, and set ui.language=<code>
+# in settings.ini (or add a language picker later). UTF-8, one key=value per
+# line, # for comments. Any key you omit falls back to English automatically.
+
+# --- First-run wizard (UX-08) ---
+wizard.title=Kestrel Setup
+wizard.welcome=Welcome to Kestrel
+wizard.intro=An always-on-top overlay for battery, system load and frame timing. Choose where it sits and how it starts.
+wizard.admin=Enable frame timing\nStart with Windows as administrator so FPS and frame-time metrics work (uses ETW).
+wizard.basic=Continue in basic mode\nBattery, CPU, GPU and power work without administrator. You can change this later in Settings.
+wizard.autostart=Start Kestrel automatically with Windows
+
+# --- Overlay corners ---
+corner.tl=Top-left
+corner.tr=Top-right
+corner.bl=Bottom-left
+corner.br=Bottom-right

@@ -6,6 +6,7 @@
 #include <cstdarg>
 #include <cstdlib>
 #include <cwchar>
+#include <format>
 
 namespace
 {
@@ -114,16 +115,240 @@ namespace
     }
 }
 
+static D2D1_COLOR_F c(int hex) { return D2D1::ColorF(hex); }
+
+static void applyDarkPalette(draw_batteryinfo_bi::palette_bi &pal)
+{
+    pal.bg = c(0x0F0F12);
+    pal.surface = c(0x17171C);
+    pal.inset = c(0x202027);
+    pal.border = c(0x2E2E36);
+    pal.borderStrong = c(0x3A3A44);
+    pal.text = c(0xEBEBEB);
+    pal.muted = c(0xC7C7C7);
+    pal.faint = c(0x8A8A94);
+    pal.disabled = c(0x5C5C66);
+    pal.trackOff = c(0x3A3A44);
+    pal.knob = c(0xF0F0F2);
+    pal.ok = c(0x7FB894);
+    pal.warn = c(0xD9B585);
+    pal.bad = c(0xC98C8C);
+}
+
+static void applyLightPalette(draw_batteryinfo_bi::palette_bi &pal)
+{
+    pal.bg = c(0xFAFAFA);
+    pal.surface = c(0xFFFFFF);
+    pal.inset = c(0xEFEFF2);
+    pal.border = c(0xE4E4E8);
+    pal.borderStrong = c(0xCCCCCC);
+    pal.text = c(0x1A1A1A);
+    pal.muted = c(0x666666);
+    pal.faint = c(0x90909A);
+    pal.disabled = c(0xB4B4BC);
+    pal.trackOff = c(0xC8C8D0);
+    pal.knob = c(0xFFFFFF);
+    pal.ok = c(0x3F8F63);
+    pal.warn = c(0xB07A2B);
+    pal.bad = c(0xB04A4A);
+}
+
+static void applyNordPalette(draw_batteryinfo_bi::palette_bi &pal)
+{
+    pal.bg = c(0x2E3440);
+    pal.surface = c(0x3B4252);
+    pal.inset = c(0x434C5E);
+    pal.border = c(0x4C566A);
+    pal.borderStrong = c(0x5E6A80);
+    pal.text = c(0xD8DEE9);
+    pal.muted = c(0xE5E9F0);
+    pal.faint = c(0x8FBCBB);
+    pal.disabled = c(0x616E88);
+    pal.trackOff = c(0x4C566A);
+    pal.knob = c(0xD8DEE9);
+    pal.ok = c(0xA3BE8C);
+    pal.warn = c(0xEBCB8B);
+    pal.bad = c(0xBF616A);
+}
+
+static void applyDraculaPalette(draw_batteryinfo_bi::palette_bi &pal)
+{
+    pal.bg = c(0x282A36);
+    pal.surface = c(0x44475A);
+    pal.inset = c(0x363850);
+    pal.border = c(0x555770);
+    pal.borderStrong = c(0x666890);
+    pal.text = c(0xF8F8F2);
+    pal.muted = c(0xC0C0D0);
+    pal.faint = c(0x9580D0);
+    pal.disabled = c(0x6272A4);
+    pal.trackOff = c(0x555770);
+    pal.knob = c(0xF8F8F2);
+    pal.ok = c(0x50FA7B);
+    pal.warn = c(0xF1FA8C);
+    pal.bad = c(0xFF5555);
+}
+
+static void applyGruvboxDarkPalette(draw_batteryinfo_bi::palette_bi &pal)
+{
+    pal.bg = c(0x282828);
+    pal.surface = c(0x32302F);
+    pal.inset = c(0x3C3836);
+    pal.border = c(0x504945);
+    pal.borderStrong = c(0x665C54);
+    pal.text = c(0xEBDBD2);
+    pal.muted = c(0xD5C4A1);
+    pal.faint = c(0xA89984);
+    pal.disabled = c(0x7C6F64);
+    pal.trackOff = c(0x504945);
+    pal.knob = c(0xEBDBD2);
+    pal.ok = c(0x98971A);
+    pal.warn = c(0xD79921);
+    pal.bad = c(0xCC241D);
+}
+
+static const D2D1_COLOR_F paletteDefault[16] = {
+    c(0x3366CC), c(0x4C7FB8), c(0x5E81AC), c(0x4C8C8C),
+    c(0x4F9E7F), c(0x6E9E56), c(0x8CA352), c(0xB58A3C),
+    c(0xC27B45), c(0xC25E5E), c(0xB54A5E), c(0xA65293),
+    c(0x8A63B5), c(0x6C63B5), c(0x5B6478), c(0x7A7A80)};
+
+static const D2D1_COLOR_F paletteDeuteranopia[16] = {
+    c(0x3366CC), c(0x4488DD), c(0x5A9EE0), c(0x66AACC),
+    c(0x88BBCC), c(0xAACCDD), c(0xDDCC88), c(0xEEBB77),
+    c(0xEE9955), c(0xDD7733), c(0xCC6633), c(0xBB5566),
+    c(0x996699), c(0x7777AA), c(0x667788), c(0x888890)};
+
+static const D2D1_COLOR_F paletteProtanopia[16] = {
+    c(0x3366CC), c(0x4488DD), c(0x6699DD), c(0x77AADD),
+    c(0x99CCBB), c(0xBBEECC), c(0xDDEE88), c(0xEECC55),
+    c(0xDDAA44), c(0xCC8833), c(0xBB7733), c(0xAA6677),
+    c(0x886688), c(0x6666AA), c(0x557788), c(0x777790)};
+
+static const D2D1_COLOR_F paletteTritanopia[16] = {
+    c(0xCC3366), c(0xDD4488), c(0xDD6699), c(0xCC8877),
+    c(0xBB9966), c(0xAABB66), c(0x88CC66), c(0x66CC77),
+    c(0x44DD88), c(0x33CC99), c(0x44BBAA), c(0x6699BB),
+    c(0x7777BB), c(0x8855AA), c(0x665577), c(0x777780)};
+
 draw_batteryinfo_bi::draw_batteryinfo_bi()
 {
     accentColor = D2D1::ColorF(0x3366CC);
-    nightMode = false;
+    nightMode = true;
+    themeIndex = THEME_DARK;
+    setTheme(THEME_DARK);
+}
 
-    colorPalette = {
-        D2D1::ColorF(0x3366CC), D2D1::ColorF(0x4C7FB8), D2D1::ColorF(0x5E81AC), D2D1::ColorF(0x4C8C8C),
-        D2D1::ColorF(0x4F9E7F), D2D1::ColorF(0x6E9E56), D2D1::ColorF(0x8CA352), D2D1::ColorF(0xB58A3C),
-        D2D1::ColorF(0xC27B45), D2D1::ColorF(0xC25E5E), D2D1::ColorF(0xB54A5E), D2D1::ColorF(0xA65293),
-        D2D1::ColorF(0x8A63B5), D2D1::ColorF(0x6C63B5), D2D1::ColorF(0x5B6478), D2D1::ColorF(0x7A7A80)};
+void draw_batteryinfo_bi::setTheme(int index, bool resetAccent)
+{
+    if (index < 0 || index >= THEME_COUNT)
+        index = THEME_DARK;
+
+    themeIndex = index;
+
+    switch (index)
+    {
+    case THEME_LIGHT:
+        nightMode = false;
+        applyLightPalette(pal);
+        colorPalette.assign(paletteDefault, paletteDefault + 16);
+        break;
+    case THEME_NORD:
+        nightMode = true;
+        applyNordPalette(pal);
+        colorPalette.assign(paletteDefault, paletteDefault + 16);
+        break;
+    case THEME_DRACULA:
+        nightMode = true;
+        applyDraculaPalette(pal);
+        colorPalette.assign(paletteDefault, paletteDefault + 16);
+        break;
+    case THEME_GRUVBOX:
+        nightMode = true;
+        applyGruvboxDarkPalette(pal);
+        colorPalette.assign(paletteDefault, paletteDefault + 16);
+        break;
+    case THEME_DEUTERANOPIA_DARK:
+        nightMode = true;
+        applyDarkPalette(pal);
+        colorPalette.assign(paletteDeuteranopia, paletteDeuteranopia + 16);
+        if (resetAccent)
+            accentColor = c(0x4488DD);
+        break;
+    case THEME_DEUTERANOPIA_LIGHT:
+        nightMode = false;
+        applyLightPalette(pal);
+        colorPalette.assign(paletteDeuteranopia, paletteDeuteranopia + 16);
+        if (resetAccent)
+            accentColor = c(0x4488DD);
+        break;
+    case THEME_PROTANOPIA_DARK:
+        nightMode = true;
+        applyDarkPalette(pal);
+        colorPalette.assign(paletteProtanopia, paletteProtanopia + 16);
+        if (resetAccent)
+            accentColor = c(0x4488DD);
+        break;
+    case THEME_PROTANOPIA_LIGHT:
+        nightMode = false;
+        applyLightPalette(pal);
+        colorPalette.assign(paletteProtanopia, paletteProtanopia + 16);
+        if (resetAccent)
+            accentColor = c(0x4488DD);
+        break;
+    case THEME_TRITANOPIA_DARK:
+        nightMode = true;
+        applyDarkPalette(pal);
+        colorPalette.assign(paletteTritanopia, paletteTritanopia + 16);
+        if (resetAccent)
+            accentColor = c(0xCC3366);
+        break;
+    case THEME_TRITANOPIA_LIGHT:
+        nightMode = false;
+        applyLightPalette(pal);
+        colorPalette.assign(paletteTritanopia, paletteTritanopia + 16);
+        if (resetAccent)
+            accentColor = c(0xCC3366);
+        break;
+    default:
+        nightMode = true;
+        applyDarkPalette(pal);
+        colorPalette.assign(paletteDefault, paletteDefault + 16);
+        break;
+    }
+}
+
+const char *draw_batteryinfo_bi::themeName(int index)
+{
+    switch (index)
+    {
+    case THEME_DARK:              return "Dark";
+    case THEME_LIGHT:             return "Light";
+    case THEME_NORD:              return "Nord";
+    case THEME_DRACULA:           return "Dracula";
+    case THEME_GRUVBOX:           return "Gruvbox";
+    case THEME_DEUTERANOPIA_DARK: return "Deuteranopia (Dark)";
+    case THEME_DEUTERANOPIA_LIGHT:return "Deuteranopia (Light)";
+    case THEME_PROTANOPIA_DARK:   return "Protanopia (Dark)";
+    case THEME_PROTANOPIA_LIGHT:  return "Protanopia (Light)";
+    case THEME_TRITANOPIA_DARK:   return "Tritanopia (Dark)";
+    case THEME_TRITANOPIA_LIGHT:  return "Tritanopia (Light)";
+    default:                      return "Dark";
+    }
+}
+
+bool draw_batteryinfo_bi::themeIsNight(int index) const
+{
+    switch (index)
+    {
+    case THEME_LIGHT:
+    case THEME_DEUTERANOPIA_LIGHT:
+    case THEME_PROTANOPIA_LIGHT:
+    case THEME_TRITANOPIA_LIGHT:
+        return false;
+    default:
+        return true;
+    }
 }
 
 void draw_batteryinfo_bi::releaseDeviceResources()
@@ -136,6 +361,7 @@ void draw_batteryinfo_bi::releaseDeviceResources()
 
     rt = nullptr;
     hits.clear();
+    clearLayoutCache();
 }
 
 draw_batteryinfo_bi::~draw_batteryinfo_bi()
@@ -145,40 +371,7 @@ draw_batteryinfo_bi::~draw_batteryinfo_bi()
 
 bool draw_batteryinfo_bi::updateBrushes(ID2D1HwndRenderTarget *pRT)
 {
-    if (nightMode)
-    {
-        pal.bg = D2D1::ColorF(0x0F0F12);
-        pal.surface = D2D1::ColorF(0x17171C);
-        pal.inset = D2D1::ColorF(0x202027);
-        pal.border = D2D1::ColorF(0x2E2E36);
-        pal.borderStrong = D2D1::ColorF(0x3A3A44);
-        pal.text = D2D1::ColorF(0xEBEBEB);
-        pal.muted = D2D1::ColorF(0xC7C7C7);
-        pal.faint = D2D1::ColorF(0x8A8A94);
-        pal.disabled = D2D1::ColorF(0x5C5C66);
-        pal.trackOff = D2D1::ColorF(0x3A3A44);
-        pal.knob = D2D1::ColorF(0xF0F0F2);
-        pal.ok = D2D1::ColorF(0x7FB894);
-        pal.warn = D2D1::ColorF(0xD9B585);
-        pal.bad = D2D1::ColorF(0xC98C8C);
-    }
-    else
-    {
-        pal.bg = D2D1::ColorF(0xFAFAFA);
-        pal.surface = D2D1::ColorF(0xFFFFFF);
-        pal.inset = D2D1::ColorF(0xEFEFF2);
-        pal.border = D2D1::ColorF(0xE4E4E8);
-        pal.borderStrong = D2D1::ColorF(0xCCCCCC);
-        pal.text = D2D1::ColorF(0x1A1A1A);
-        pal.muted = D2D1::ColorF(0x666666);
-        pal.faint = D2D1::ColorF(0x90909A);
-        pal.disabled = D2D1::ColorF(0xB4B4BC);
-        pal.trackOff = D2D1::ColorF(0xC8C8D0);
-        pal.knob = D2D1::ColorF(0xFFFFFF);
-        pal.ok = D2D1::ColorF(0x3F8F63);
-        pal.warn = D2D1::ColorF(0xB07A2B);
-        pal.bad = D2D1::ColorF(0xB04A4A);
-    }
+    setTheme(themeIndex, false);  // keep the user's accent; only re-apply palette
 
     if (!pBrush && pRT)
         pRT->CreateSolidColorBrush(pal.text, &pBrush);
@@ -299,10 +492,51 @@ void draw_batteryinfo_bi::txt(IDWriteTextFormat *f, float l, float t, float r, f
     if (!f || s.empty())
         return;
 
-    f->SetTextAlignment(align);
     pBrush->SetColor(c);
+
+    if (dwriteFactory && s.size() < 256)
+    {
+        LayoutKey key(s, f, r - l, b - t, align);
+        std::unordered_map<LayoutKey, IDWriteTextLayout*, LayoutHash>::iterator it = layoutCache.find(key);
+        IDWriteTextLayout *layout = nullptr;
+
+        if (it != layoutCache.end())
+        {
+            layout = it->second;
+        }
+        else
+        {
+            HRESULT hr = dwriteFactory->CreateTextLayout(
+                s.c_str(), (UINT32)s.size(), f, r - l, b - t, &layout);
+            if (SUCCEEDED(hr) && layout)
+            {
+                layout->SetTextAlignment(align);
+                layoutCache[key] = layout;
+            }
+        }
+
+        if (layout)
+        {
+            rt->DrawTextLayout(D2D1::Point2F(l, t), layout, pBrush,
+                               clip ? D2D1_DRAW_TEXT_OPTIONS_CLIP : D2D1_DRAW_TEXT_OPTIONS_NONE);
+            return;
+        }
+    }
+
+    f->SetTextAlignment(align);
     rt->DrawText(s.c_str(), (UINT32)s.length(), f, D2D1::RectF(l, t, r, b), pBrush,
                  clip ? D2D1_DRAW_TEXT_OPTIONS_CLIP : D2D1_DRAW_TEXT_OPTIONS_NONE);
+}
+
+void draw_batteryinfo_bi::clearLayoutCache()
+{
+    for (std::unordered_map<LayoutKey, IDWriteTextLayout*, LayoutHash>::iterator it = layoutCache.begin();
+         it != layoutCache.end(); ++it)
+    {
+        if (it->second)
+            it->second->Release();
+    }
+    layoutCache.clear();
 }
 
 void draw_batteryinfo_bi::bar(float l, float t, float w, float h, float fraction,
@@ -643,6 +877,36 @@ void draw_batteryinfo_bi::endScrollDrag()
     scrollDragging = false;
 }
 
+bool draw_batteryinfo_bi::beginGraphHeightDrag(POINT cursorPos, overlay_bi *ov)
+{
+    if (selectedTab != APPEARANCE)
+        return false;
+
+    // Generous padding so the thin track is easy to grab.
+    const float padX = 10.0f;
+    const float padY = 12.0f;
+    if (cursorPos.x < graphSliderTrack.left - padX || cursorPos.x > graphSliderTrack.right + padX ||
+        cursorPos.y < graphSliderTrack.top - padY || cursorPos.y > graphSliderTrack.bottom + padY)
+        return false;
+
+    graphHeightDragging = true;
+    updateGraphHeightDrag(cursorPos, ov);
+    return true;
+}
+
+void draw_batteryinfo_bi::updateGraphHeightDrag(POINT cursorPos, overlay_bi *ov)
+{
+    if (!ov)
+        return;
+    float w = graphSliderTrack.right - graphSliderTrack.left;
+    if (w < 1.0f)
+        return;
+    float frac = (cursorPos.x - graphSliderTrack.left) / w;
+    if (frac < 0.0f) frac = 0.0f;
+    if (frac > 1.0f) frac = 1.0f;
+    ov->graphHeightMultiplier = 0.5f + frac * 2.5f;
+}
+
 void draw_batteryinfo_bi::drawFooter(init_dwrite_bi *dw, const std::wstring &text)
 {
     float top = viewHeight - FOOTER_H;
@@ -957,19 +1221,25 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         r = {L"Frame time percentiles", &ov->hud.showLows, nullptr, MC_NONE, frameOk,
              L"Worst-case 1% and 0.1% low FPS (Low:)"};
         out.push_back(r);
+        r = {L"Network speeds", &ov->hud.showNetwork, nullptr, MC_NONE, true,
+             L"Download and upload speeds (Dw:/Up:)"};
+        out.push_back(r);
+        r = {L"Disk usage", &ov->hud.showDisk, nullptr, MC_NONE, true,
+             L"Disk space used on the system drive (Dsk:)"};
+        out.push_back(r);
         break;
 
     case GROUP_FRAME:
         r = {L"Frame rate", &ov->hud.metrics[HUD_M_FPS].show, nullptr, MC_CPU, frameOk,
-             L"Frames per second (FPS:)"};
+             L"Frames per second (FPS:)", HUD_M_FPS};
         out.push_back(r);
         r = {L"Frame interval", &ov->hud.metrics[HUD_M_PRE].show,
              &ov->hud.metrics[HUD_M_PRE].graphed, MC_CPU, frameOk,
-             L"Milliseconds between frames (Pre:)"};
+             L"Milliseconds between frames (Pre:)", HUD_M_PRE};
         out.push_back(r);
         r = {L"GPU milliseconds", &ov->hud.metrics[HUD_M_GPUMS].show,
              &ov->hud.metrics[HUD_M_GPUMS].graphed, MC_GPUMS, frameOk,
-             L"GPU render time per frame (GPU: ms)"};
+             L"GPU render time per frame (GPU: ms)", HUD_M_GPUMS};
         out.push_back(r);
         r = {L"CPU or GPU bound", &ov->hud.showBottleneck, nullptr, MC_NONE, frameOk,
              L"Which one is capping the frame rate (Bnd:)"};
@@ -978,27 +1248,38 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
 
     case GROUP_GPU:
         r = {L"Load", &ru->gpuInfo.show_gpuLoad, &ov->hud.metrics[HUD_M_GPU].graphed, MC_GPU, true,
-             L"GPU busy percentage (GPU: %)"};
+             L"GPU busy percentage (GPU: %)", HUD_M_GPU};
         out.push_back(r);
         r = {L"Video memory", &ru->gpuInfo.show_vram, nullptr, MC_GPU,
              ru->gpuInfo.vramTotalMB > 0.0, L"VRAM used and total (VRM:)"};
         out.push_back(r);
+        r = {L"Temperature", &ru->gpuInfo.show_gpuTemp, nullptr, MC_NONE,
+             ru->gpuInfo.gpuTempAvailable,
+             L"GPU temperature from WMI thermal zone (experimental)"};
+        out.push_back(r);
         r = {L"Power draw", &ru->gpuInfo.show_gpuPower,
              &ov->hud.metrics[HUD_M_GPUW].graphed, MC_POWER, ru->gpuInfo.gpuPowerAvailable,
-             L"GPU watts from the Energy Meter (GPW:)"};
+             L"GPU watts from the Energy Meter (GPW:)", HUD_M_GPUW};
         out.push_back(r);
         r = {L"Adapter name", &ru->gpuInfo.show_gpuName, nullptr, MC_NONE, true,
              L"Graphics card model"};
+        out.push_back(r);
+        r = {L"Per-adapter VRAM", &ru->gpuInfo.show_adapters, nullptr, MC_NONE,
+             ru->adapters.size() > 1, L"Show VRAM for each adapter separately"};
         out.push_back(r);
         break;
 
     case GROUP_CPU:
         r = {L"Load", &ru->cpuInfo.show_UsagePercent, &ov->hud.metrics[HUD_M_CPU].graphed,
-             MC_CPU, true, L"Total CPU utilisation (CPU: %)"};
+             MC_CPU, true, L"Total CPU utilisation (CPU: %)", HUD_M_CPU};
+        out.push_back(r);
+        r = {L"Temperature", &ru->cpuInfo.show_cpuTemp, nullptr, MC_NONE,
+             ru->cpuInfo.cpuTempAvailable,
+             L"CPU temperature from WMI thermal zone (experimental)"};
         out.push_back(r);
         r = {L"Package power", &ru->cpuInfo.show_packagePower,
              &ov->hud.metrics[HUD_M_CPUW].graphed, MC_POWER, powerOk,
-             L"CPU package watts (CPW:)"};
+             L"CPU package watts (CPW:)", HUD_M_CPUW};
         out.push_back(r);
         r = {L"Frames per watt", &ov->hud.showEfficiency, nullptr, MC_POWER,
              frameOk && powerOk, L"FPS delivered per CPU watt (Eff:)"};
@@ -1038,17 +1319,17 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         out.push_back(r);
         r = {L"Power flow graph", &ov->hud.metrics[HUD_M_BATTERYD].show,
              &ov->hud.metrics[HUD_M_BATTERYD].graphed, MC_POWER, bi->present,
-             L"Battery charge/discharge watts (Bat:)"};
+             L"Battery charge/discharge watts (Bat:)", HUD_M_BATTERYD};
         out.push_back(r);
         break;
 
     case GROUP_MEMORY:
         r = {L"Load", &ru->ramInfo.show_dwMemoryLoad, &ov->hud.metrics[HUD_M_RAM].graphed,
-             MC_RAM, true, L"Physical RAM in use (RAM: %)"};
+             MC_RAM, true, L"Physical RAM in use (RAM: %)", HUD_M_RAM};
         out.push_back(r);
         r = {L"Commit charge", &ru->ramInfo.show_ullTotalPageFile,
              &ov->hud.metrics[HUD_M_COMMIT].graphed, MC_COMMIT, true,
-             L"Committed memory against the limit (Cmt:)"};
+             L"Committed memory against the limit (Cmt:)", HUD_M_COMMIT};
         out.push_back(r);
         r = {L"Total physical", &ru->ramInfo.show_ullTotalPhys, nullptr, MC_NONE, true,
              L"Installed RAM"};
@@ -1086,7 +1367,40 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         r = {L"Auto-hide overlay", &ov->autoHideOverlay, nullptr, MC_NONE, true,
              L"Only show the overlay while a game or fullscreen app is running"};
         out.push_back(r);
+        r = {L"Click-through overlay", &ov->clickable, nullptr, MC_NONE, true,
+             L"Let mouse clicks pass through the overlay (toggle off to interact)"};
+        out.push_back(r);
         break;
+    }
+
+    if (!searchQuery.empty())
+    {
+        std::string lowerQuery;
+        for (size_t i = 0; i < searchQuery.size(); ++i)
+            lowerQuery += (char)tolower((unsigned char)searchQuery[i]);
+
+        for (size_t i = 0; i < out.size();)
+        {
+            std::wstring wlabel(out[i].label);
+            std::string label;
+            for (size_t j = 0; j < wlabel.size(); ++j)
+                label += (char)tolower((unsigned char)wlabel[j]);
+
+            std::wstring wdesc(out[i].desc);
+            std::string desc;
+            for (size_t j = 0; j < wdesc.size(); ++j)
+                desc += (char)tolower((unsigned char)wdesc[j]);
+
+            if (label.find(lowerQuery) == std::string::npos &&
+                desc.find(lowerQuery) == std::string::npos)
+            {
+                out.erase(out.begin() + i);
+            }
+            else
+            {
+                ++i;
+            }
+        }
     }
 
     return (int)out.size();
@@ -1217,10 +1531,7 @@ std::string draw_batteryinfo_bi::captureLayout(overlay_bi *ov, resource_usage_bi
     std::vector<bool> bits;
     snapshotRows(ov, ru, bi, bits);
 
-    char hdr[16];
-    snprintf(hdr, sizeof(hdr), "%d:", (int)bits.size());
-
-    std::string out = hdr;
+    std::string out = std::format("{}:", (int)bits.size());
     for (size_t i = 0; i < bits.size(); ++i)
         out += bits[i] ? '1' : '0';
 
@@ -1379,7 +1690,7 @@ D2D1_SIZE_F draw_batteryinfo_bi::measureOverlayPanel(overlay_bi *ov) const
         }
         else
         {
-            height += lay.graphTopNudge + lay.graphHeight + lay.graphGap;
+            height += lay.graphTopNudge + lay.graphHeight * ov->graphHeightMultiplier + lay.graphGap;
             lastWasGraph = true;
         }
     }
@@ -1478,7 +1789,7 @@ void draw_batteryinfo_bi::drawOverlayPreview(init_dwrite_bi *dw, overlay_bi *ov,
         else
         {
             float top = y + lay.graphTopNudge;
-            float axisY = top + lay.graphHeight;
+            float axisY = top + lay.graphHeight * ov->graphHeightMultiplier;
 
             int divisions = lay.gridDivisions > 0 ? lay.gridDivisions : 1;
             float span = (right - left) - 1.0f;
@@ -1516,6 +1827,20 @@ void draw_batteryinfo_bi::drawOverlayPreview(init_dwrite_bi *dw, overlay_bi *ov,
 
                 drawPanelSeries(metric.series, scaleMax, left, right, top, axisY,
                                 ov->resolveColor(metric.color));
+
+                std::string lbl = std::format("{} {:.1f} {}",
+                                               metric.label, metric.series.current(), metric.unit);
+                std::wstring wlbl(lbl.begin(), lbl.end());
+                float lblW = (float)wlbl.size() * 5.5f;
+                float lx = right - lblW - 2.0f;
+                float ly = top + 2.0f;
+                if (lx >= left)
+                {
+                    fillRR(lx, ly, lx + lblW, ly + 14.0f, 3.0f,
+                           D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.65f));
+                    txt(dw->pTextFormatMicro, lx + 1.0f, ly, lx + lblW, ly + 14.0f,
+                        D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.9f), wlbl);
+                }
             }
 
             y = axisY + lay.graphGap;
@@ -1679,6 +2004,29 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
             L"number applies \u00B7 arrow saves current setup");
 
     y += 28.0f + CARD_GAP;
+
+    // Search bar temporarily disabled (UX-03). Re-enable by restoring this block;
+    // it also drove searchQuery filtering in buildGroupRows.
+#if 0
+    float searchLeft = L + RAIL_W + 18.0f;
+    float searchRight = R;
+    float searchH = 30.0f;
+    bool searchHot = isHovered(HIT_SEARCH, 0);
+    D2D1_COLOR_F searchBg = searchFocused ? pal.inset : pal.surface;
+    fillRR(searchLeft, y, searchRight, y + searchH, BTN_R, searchBg);
+    strokeRR(searchLeft, y, searchRight, y + searchH, BTN_R,
+             searchFocused ? accentColor : (searchHot ? pal.faint : pal.border), 1.0f);
+    txt(dw->pTextFormatLabel, searchLeft + 8.0f, y, searchRight - 8.0f, y + searchH,
+        searchFocused ? pal.text : pal.muted,
+        searchFocused ? std::wstring(L"") :
+        (searchQuery.empty() ? L"Search settings..." :
+                               wfmt(L"%hs", searchQuery.c_str())));
+    if (searchFocused)
+        txt(dw->pTextFormatLabel, searchLeft + 8.0f, y, searchRight - 8.0f, y + searchH,
+            pal.text, wfmt(L"%hs|", searchQuery.c_str()));
+    pushHit(D2D1::RectF(searchLeft, y, searchRight, y + searchH), HIT_SEARCH, 0, nullptr);
+    y += searchH + CARD_GAP;
+#endif
 
     float railTop = y;
     D2D1_COLOR_F active = accentText();
@@ -1847,8 +2195,6 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
 
         float labelX = PX + 14.0f;
 
-        float descRight = paneRight - 140.0f;
-
         if (row.color != MC_NONE)
         {
             float dotY = row.desc ? (ry + 19.0f) : (ry + rowHeight * 0.5f);
@@ -1856,6 +2202,29 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
                    dimmed ? pal.disabled : metricColor(row.color));
             labelX = PX + 28.0f;
         }
+
+        // Compute control geometry first, then clamp the description to its left
+        // edge \u2014 otherwise long descriptions run under the arrows/chips.
+        float chipY = ry + (rowHeight - CHIP_H) * 0.5f;
+        float rowChipX = paneRight - 14.0f - CHIP_ROW_W;
+        float graphChipX = rowChipX - 6.0f - CHIP_GRAPH_W;
+        float arrowSize = 22.0f;
+        float arrowGap = 2.0f;
+        float arrowY = ry + (rowHeight - arrowSize) * 0.5f;  // center with the chips
+        float dnX = graphChipX - arrowGap - arrowSize;
+        float upX = dnX - arrowGap - arrowSize;
+
+        float controlLeft;
+        if (useToggles)
+            controlLeft = paneRight - 14.0f - TOGGLE_W;
+        else if (row.metricId >= 0)
+            controlLeft = upX;
+        else if (row.graph)
+            controlLeft = graphChipX;
+        else
+            controlLeft = rowChipX;
+
+        float descRight = controlLeft - 12.0f;
 
         if (row.desc)
         {
@@ -1879,8 +2248,22 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
         }
         else
         {
-            float chipY = ry + (rowHeight - CHIP_H) * 0.5f;
-            float rowChipX = paneRight - 14.0f - CHIP_ROW_W;
+            if (row.metricId >= 0)
+            {
+                txt(dw->pTextFormatMicro, upX, arrowY, upX + arrowSize, arrowY + arrowSize,
+                    isHovered(HIT_MOVEUP, i) ? active : pal.faint, L"\u25B2",
+                    DWRITE_TEXT_ALIGNMENT_CENTER);
+                if (row.available)
+                    pushHit(D2D1::RectF(upX, arrowY, upX + arrowSize, arrowY + arrowSize),
+                            HIT_MOVEUP, i, nullptr);
+
+                txt(dw->pTextFormatMicro, dnX, arrowY, dnX + arrowSize, arrowY + arrowSize,
+                    isHovered(HIT_MOVEDOWN, i) ? active : pal.faint, L"\u25BC",
+                    DWRITE_TEXT_ALIGNMENT_CENTER);
+                if (row.available)
+                    pushHit(D2D1::RectF(dnX, arrowY, dnX + arrowSize, arrowY + arrowSize),
+                            HIT_MOVEDOWN, i, nullptr);
+            }
 
             chip(dw, rowChipX, chipY, CHIP_ROW_W, L"Row", *row.show, dimmed);
             if (row.available)
@@ -1893,7 +2276,6 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
 
             if (row.graph)
             {
-                float graphChipX = rowChipX - 6.0f - CHIP_GRAPH_W;
                 chip(dw, graphChipX, chipY, CHIP_GRAPH_W, L"Graph", *row.graph, dimmed);
                 if (row.available)
                 {
@@ -1907,6 +2289,29 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
     }
 
     float paneBottom = paneY + cardH;
+
+    // Graph-height slider and metric-order reset both live on the Appearance tab.
+
+    if (settingsGroup == GROUP_BEHAVIOR)
+    {
+        paneBottom += CARD_GAP;
+        float btnH = 32.0f;
+        float btnY = paneBottom;
+        float btnW = 200.0f;
+        bool hot = isHovered(HIT_ACTION, ACT_SAVE_PROFILE);
+
+        if (hot)
+            hoverFill(PX, btnY, PX + btnW, btnY + btnH, BTN_R);
+        strokeRR(PX, btnY, PX + btnW, btnY + btnH, BTN_R, hot ? pal.faint : pal.border, 1.0f);
+        txt(dw->pTextFormatLabel, PX, btnY, PX + btnW, btnY + btnH, pal.text,
+            L"Save profile for foreground app", DWRITE_TEXT_ALIGNMENT_CENTER);
+
+        if (hot)
+            hoverRing(PX, btnY, PX + btnW, btnY + btnH, BTN_R);
+        pushHit(D2D1::RectF(PX, btnY, PX + btnW, btnY + btnH), HIT_ACTION, ACT_SAVE_PROFILE, nullptr);
+
+        paneBottom += btnH;
+    }
 
     if (settingsGroup == GROUP_CPU && !ru->cpuInfo.packagePowerAvailable)
     {
@@ -2195,58 +2600,77 @@ void draw_batteryinfo_bi::drawAppearanceTab(ID2D1HwndRenderTarget *pRT, init_dwr
     D2D1_COLOR_F active = accentText();
     float y = TABBAR_H + PAD + shift;
 
-    card(L, y, R, y + 150.0f);
+    // 3 columns so the longer theme names (e.g. "Deuteranopia (Light)") fit.
+    const int themeCols = 3;
+    float chipH = 72.0f;
+    float gap = 8.0f;
+    float previewW = (IW - (themeCols - 1) * gap) / (float)themeCols;
+    int themeRows = (THEME_COUNT + themeCols - 1) / themeCols;
+    float previewY = y + 38.0f;
+    float themeGridBottom = previewY + themeRows * (chipH + gap) - gap;
+
+    // Size the card to the actual grid; a fixed height left the last rows
+    // spilling outside the card.
+    card(L, y, R, themeGridBottom + 14.0f);
     eyebrow(dw, IX, y + 16.0f, L"THEME");
 
-    float previewW = (IW - 16.0f) * 0.5f;
-    float previewY = y + 38.0f;
-
-    for (int i = 0; i < 2; ++i)
+    for (int i = 0; i < THEME_COUNT; ++i)
     {
-        bool dark = (i == 1);
-        float bx = IX + i * (previewW + 16.0f);
+        int col = i % themeCols;
+        int row = i / themeCols;
+        float bx = IX + col * (previewW + gap);
 
-        D2D1_COLOR_F mbg = dark ? D2D1::ColorF(0x0F0F12) : D2D1::ColorF(0xFAFAFA);
-        D2D1_COLOR_F msurface = dark ? D2D1::ColorF(0x17171C) : D2D1::ColorF(0xFFFFFF);
-        D2D1_COLOR_F mborder = dark ? D2D1::ColorF(0x2E2E36) : D2D1::ColorF(0xE4E4E8);
-        D2D1_COLOR_F mtext = dark ? D2D1::ColorF(0xEBEBEB) : D2D1::ColorF(0x1A1A1A);
-        D2D1_COLOR_F mmuted = dark ? D2D1::ColorF(0x5C5C66) : D2D1::ColorF(0xC8C8D0);
+        D2D1_COLOR_F chipBg = pal.inset;
+        D2D1_COLOR_F chipBorder = pal.border;
 
-        fillRR(bx, previewY, bx + previewW, previewY + 88.0f, 8.0f, mbg);
-        strokeRR(bx, previewY, bx + previewW, previewY + 88.0f, 8.0f, mborder, 1.0f);
+        fillRR(bx, previewY + row * (chipH + gap), bx + previewW, previewY + row * (chipH + gap) + chipH,
+               6.0f, chipBg);
+        strokeRR(bx, previewY + row * (chipH + gap), bx + previewW, previewY + row * (chipH + gap) + chipH,
+                 6.0f, chipBorder, 1.0f);
 
-        fillRR(bx + 12.0f, previewY + 10.0f, bx + 22.0f, previewY + 20.0f, 3.0f, mtext);
-        fillRR(bx + 28.0f, previewY + 13.0f, bx + 62.0f, previewY + 18.0f, 2.5f, mtext);
-        line(bx + 1.0f, previewY + 28.0f, bx + previewW - 1.0f, previewY + 28.0f, mborder, 1.0f);
-
-        fillRR(bx + 12.0f, previewY + 35.0f, bx + 34.0f, previewY + 40.0f, 2.5f, accentColor);
-        fillRR(bx + 42.0f, previewY + 35.0f, bx + 68.0f, previewY + 40.0f, 2.5f, mmuted);
-        fillRR(bx + 76.0f, previewY + 35.0f, bx + 96.0f, previewY + 40.0f, 2.5f, mmuted);
-
-        fillRR(bx + 12.0f, previewY + 50.0f, bx + previewW - 12.0f, previewY + 78.0f,
-               5.0f, msurface);
-        strokeRR(bx + 12.0f, previewY + 50.0f, bx + previewW - 12.0f, previewY + 78.0f,
-                 5.0f, mborder, 1.0f);
-        fillRR(bx + 22.0f, previewY + 58.0f, bx + 62.0f, previewY + 63.0f, 2.5f, mmuted);
-        fillRR(bx + 22.0f, previewY + 68.0f, bx + 22.0f + (previewW - 64.0f) * 0.6f,
-               previewY + 74.0f, 3.0f, accentColor);
-
-        bool selected = (dark == nightMode);
+        bool selected = (i == themeIndex);
         if (selected)
-            strokeRR(bx - 3.0f, previewY - 3.0f, bx + previewW + 3.0f, previewY + 91.0f,
-                     10.0f, active, 2.0f);
+            strokeRR(bx - 2.0f, previewY + row * (chipH + gap) - 2.0f,
+                     bx + previewW + 2.0f, previewY + row * (chipH + gap) + chipH + 2.0f,
+                     8.0f, active, 2.0f);
         else if (isHovered(HIT_THEME, i))
-            strokeRR(bx - 3.0f, previewY - 3.0f, bx + previewW + 3.0f, previewY + 91.0f,
-                     10.0f, pal.faint, 1.5f);
+            strokeRR(bx - 2.0f, previewY + row * (chipH + gap) - 2.0f,
+                     bx + previewW + 2.0f, previewY + row * (chipH + gap) + chipH + 2.0f,
+                     8.0f, pal.faint, 1.5f);
 
-        txt(dw->pTextFormatLabel, bx, previewY + 94.0f, bx + previewW, previewY + 110.0f,
-            selected ? active : pal.muted, dark ? L"Dark" : L"Light",
-            DWRITE_TEXT_ALIGNMENT_CENTER);
+        D2D1_COLOR_F swatch = accentColor;
+        if (i == THEME_NORD) swatch = c(0x5E81AC);
+        else if (i == THEME_DRACULA) swatch = c(0xBD93F9);
+        else if (i == THEME_GRUVBOX) swatch = c(0x83A598);
+        else if (i == THEME_DEUTERANOPIA_DARK || i == THEME_DEUTERANOPIA_LIGHT) swatch = c(0x4488DD);
+        else if (i == THEME_PROTANOPIA_DARK || i == THEME_PROTANOPIA_LIGHT) swatch = c(0x6699DD);
+        else if (i == THEME_TRITANOPIA_DARK || i == THEME_TRITANOPIA_LIGHT) swatch = c(0xCC3366);
 
-        pushHit(D2D1::RectF(bx, previewY, bx + previewW, previewY + 110.0f), HIT_THEME, i, nullptr);
+        fillRR(bx + 8.0f, previewY + row * (chipH + gap) + 8.0f,
+               bx + 20.0f, previewY + row * (chipH + gap) + 20.0f, 3.0f, swatch);
+
+        txt(dw->pTextFormatSmall,
+            bx + 28.0f, previewY + row * (chipH + gap) + 6.0f,
+            bx + previewW - 4.0f, previewY + row * (chipH + gap) + 22.0f,
+            selected ? active : pal.text,
+            widen(std::string(themeName(i))));
+
+        float barY = previewY + row * (chipH + gap) + 30.0f;
+        D2D1_COLOR_F barPal[4] = {swatch, c(0x7FB894), c(0xD9B585), c(0xC98C8C)};
+        float barW = (previewW - 20.0f) / 4.0f;
+        for (int b = 0; b < 4; ++b)
+        {
+            fillRR(bx + 8.0f + b * (barW + 2.0f), barY,
+                   bx + 8.0f + (b + 1) * barW + b * 2.0f, barY + 8.0f,
+                   2.0f, barPal[b]);
+        }
+
+        pushHit(D2D1::RectF(bx, previewY + row * (chipH + gap),
+                            bx + previewW, previewY + row * (chipH + gap) + chipH),
+                HIT_THEME, i, nullptr);
     }
 
-    y += 150.0f + CARD_GAP;
+    y = themeGridBottom + 14.0f + CARD_GAP;
 
     card(L, y, R, y + 146.0f);
     eyebrow(dw, IX, y + 16.0f, L"ACCENT");
@@ -2317,6 +2741,35 @@ void draw_batteryinfo_bi::drawAppearanceTab(ID2D1HwndRenderTarget *pRT, init_dwr
     }
 
     y += 145.0f + CARD_GAP;
+
+    // Graph height (moved here from the Settings tab). Draggable slider.
+    card(L, y, R, y + 74.0f);
+    eyebrow(dw, IX, y + 16.0f, L"GRAPH HEIGHT");
+    txt(dw->pTextFormatSmall, IR - 90.0f, y + 12.0f, IR, y + 30.0f, pal.text,
+        wfmt(L"%.1fx", ov ? ov->graphHeightMultiplier : 1.0f), DWRITE_TEXT_ALIGNMENT_TRAILING);
+    if (ov)
+    {
+        float gsL = IX;
+        float gsR = IR;
+        float gsY = y + 44.0f;
+        float gsH = 14.0f;
+        fillRR(gsL, gsY, gsR, gsY + gsH, 7.0f, pal.inset);
+
+        float gsFrac = (ov->graphHeightMultiplier - 0.5f) / 2.5f;
+        if (gsFrac < 0.0f) gsFrac = 0.0f;
+        if (gsFrac > 1.0f) gsFrac = 1.0f;
+        float gsFill = gsL + gsFrac * (gsR - gsL);
+        fillRR(gsL, gsY, gsFill, gsY + gsH, 7.0f, tint(active, 0.5f));
+        float gsKnobR = 8.0f;
+        fillEl(gsFill, gsY + gsH * 0.5f, gsKnobR, pal.knob);
+        strokeRR(gsFill - gsKnobR, gsY + gsH * 0.5f - gsKnobR,
+                 gsFill + gsKnobR, gsY + gsH * 0.5f + gsKnobR,
+                 gsKnobR, isHovered(HIT_GRAPHHEIGHT, 0) ? active : pal.border, 1.5f);
+
+        graphSliderTrack = D2D1::RectF(gsL, gsY, gsR, gsY + gsH);
+        pushHit(D2D1::RectF(gsL, gsY - 8.0f, gsR, gsY + gsH + 8.0f), HIT_GRAPHHEIGHT, 0, nullptr);
+    }
+    y += 74.0f + CARD_GAP;
 
     card(L, y, R, y + 246.0f);
     txt(dw->pTextFormatValue, IX, y + 16.0f, IX + 300.0f, y + 34.0f, pal.text,
@@ -2703,6 +3156,9 @@ draw_batteryinfo_bi::click_result_bi draw_batteryinfo_bi::handleClick(POINT curs
                 else if (ru && ru->start_With_Windows != wasAutostart)
                     result.toggledAutostart = true;
 
+                if (ov && h.state == &ov->clickable)
+                    ov->updateClickThrough();
+
                 result.needsSave = true;
             }
             break;
@@ -2711,13 +3167,20 @@ draw_batteryinfo_bi::click_result_bi draw_batteryinfo_bi::handleClick(POINT curs
             setSettingsGroup(h.index);
             break;
 
+        case HIT_SEARCH:
+            searchFocused = !searchFocused;
+            if (!searchFocused)
+                searchQuery.clear();
+            result.needsSave = true;
+            break;
+
         case HIT_PRESET:
             applyPreset(h.index, ov, ru, bi);
             result.needsSave = true;
             break;
 
         case HIT_THEME:
-            nightMode = (h.index == 1);
+            setTheme(h.index);
             result.needsBrushRebuild = true;
             result.needsSave = true;
             break;
@@ -2790,6 +3253,69 @@ draw_batteryinfo_bi::click_result_bi draw_batteryinfo_bi::handleClick(POINT curs
                 h.index <= resource_usage_bi::MEM_UNIT_GB)
             {
                 ru->memUnit = h.index;
+                result.needsSave = true;
+            }
+            break;
+
+        case HIT_MOVEUP:
+        case HIT_MOVEDOWN:
+            if (ov)
+            {
+                std::vector<int> &order = ov->hud.metricOrder;
+                if (order.empty())
+                {
+                    order.resize(HUD_M_COUNT);
+                    for (int mi = 0; mi < HUD_M_COUNT; ++mi)
+                        order[mi] = mi;
+                }
+
+                int metricId = -1;
+                std::vector<row_bi> &rows = rowScratch;
+                int rowCount = buildGroupRows(settingsGroup, ov, ru, bi, rows);
+                if (h.index >= 0 && h.index < rowCount)
+                    metricId = rows[h.index].metricId;
+
+                if (metricId >= 0)
+                {
+                    int pos = -1;
+                    for (size_t oi = 0; oi < order.size(); ++oi)
+                    {
+                        if (order[oi] == metricId)
+                        {
+                            pos = (int)oi;
+                            break;
+                        }
+                    }
+                    if (pos >= 0)
+                    {
+                        int swap = (h.kind == HIT_MOVEUP) ? pos - 1 : pos + 1;
+                        if (swap >= 0 && swap < (int)order.size())
+                        {
+                            std::swap(order[pos], order[swap]);
+                            result.needsSave = true;
+                        }
+                    }
+                }
+            }
+            break;
+
+        case HIT_GRAPHHEIGHT:
+            if (ov)
+            {
+                float sliderL = h.rect.left;
+                float sliderR = h.rect.right;
+                float frac = (cursorPos.x - sliderL) / (sliderR - sliderL);
+                if (frac < 0.0f) frac = 0.0f;
+                if (frac > 1.0f) frac = 1.0f;
+                ov->graphHeightMultiplier = 0.5f + frac * 2.5f;
+                result.needsSave = true;
+            }
+            break;
+
+        case HIT_RESETORDER:
+            if (ov)
+            {
+                ov->hud.metricOrder.clear();
                 result.needsSave = true;
             }
             break;

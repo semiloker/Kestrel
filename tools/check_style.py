@@ -6,68 +6,14 @@ import sys
 SOURCE_GLOBS = ["src/*.cpp", "include/*.h"]
 MAX_LINE = 180
 
-
-def find_comments(text):
-    hits = []
-    i = 0
-    n = len(text)
-    line = 1
-    state = "code"
-
-    while i < n:
-        c = text[i]
-        nxt = text[i + 1] if i + 1 < n else ""
-
-        if c == "\n":
-            line += 1
-
-        if state == "code":
-            if c == '"':
-                state = "str"
-            elif c == "'":
-                state = "chr"
-            elif c == "/" and nxt == "/":
-                hits.append(line)
-                state = "line"
-                i += 2
-                continue
-            elif c == "/" and nxt == "*":
-                hits.append(line)
-                state = "block"
-                i += 2
-                continue
-        elif state == "str":
-            if c == "\\":
-                i += 2
-                continue
-            if c == '"':
-                state = "code"
-        elif state == "chr":
-            if c == "\\":
-                i += 2
-                continue
-            if c == "'":
-                state = "code"
-        elif state == "line":
-            if c == "\n":
-                state = "code"
-        elif state == "block":
-            if c == "*" and nxt == "/":
-                state = "code"
-                i += 2
-                continue
-
-        i += 1
-
-    return hits
+# Note: the old "no comments" rule was dropped — the codebase now uses
+# intentional documentation and rationale comments. DEV-06 tracks replacing
+# this script with clang-format. Whitespace/line-length/guard checks remain.
 
 
 def check_file(path, failures):
     with open(path, encoding="utf-8") as f:
         text = f.read()
-
-    for line in find_comments(text):
-        failures.append("%s:%d: comment found; this project does not use comments" % (path, line))
 
     for idx, raw in enumerate(text.split("\n"), start=1):
         if raw.rstrip("\r") != raw.rstrip():

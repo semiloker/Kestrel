@@ -80,6 +80,9 @@ enum hud_metric_id_bi
     HUD_M_CPUW,
     HUD_M_GPUW,
     HUD_M_BATTERYD,
+    HUD_M_NETDOWN,
+    HUD_M_NETUP,
+    HUD_M_DISK,
     HUD_M_COUNT
 };
 
@@ -167,10 +170,22 @@ public:
     double vramUsedMB = 0.0;
     double vramTotalMB = 0.0;
 
+    bool showNetwork = false;
+    bool showDisk = false;
+
+    double netDownKBs = 0.0;
+    double netUpKBs = 0.0;
+
+    double diskUsedGB = 0.0;
+    double diskTotalGB = 0.0;
+    bool diskAvailable = false;
+
     std::string cpuName;
     std::string cpuArch;
     bool showCpuName = false;
     bool showCpuArch = false;
+
+    std::vector<int> metricOrder;
 
     void initStaticInfo(const std::string &adapterName);
 

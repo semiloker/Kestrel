@@ -54,7 +54,7 @@ void overlay_bi::CreateOverlayWindow(HINSTANCE hInstance, HWND parentHwnd)
         RegisterClassA(&wc);
 
     int w = (int)(layout.panelWidthFor(HUD_MIN_COLUMNS) + 0.5f);
-    int h = (int)(layout.padTop + 6.0f * layout.lineHeight + layout.graphHeight +
+    int h = (int)(layout.padTop + 6.0f * layout.lineHeight + layout.graphHeight * graphHeightMultiplier +
                   layout.padBottom + 0.5f);
 
     g_hwnd = CreateWindowExA(
@@ -75,6 +75,8 @@ void overlay_bi::CreateOverlayWindow(HINSTANCE hInstance, HWND parentHwnd)
     BOOL disablePeek = TRUE;
     DwmSetWindowAttribute(g_hwnd, DWMWA_DISALLOW_PEEK, &disablePeek, sizeof(disablePeek));
 
+    updateClickThrough();
+
     ShowWindow(g_hwnd, SW_SHOWNOACTIVATE);
 
     Render();
@@ -89,6 +91,19 @@ void overlay_bi::DestroyOverlayWindow()
         DestroyWindow(g_hwnd);
 
     g_hwnd = NULL;
+}
+
+void overlay_bi::updateClickThrough()
+{
+    if (!g_hwnd || !IsWindow(g_hwnd))
+        return;
+
+    LONG_PTR ex = GetWindowLongPtr(g_hwnd, GWL_EXSTYLE);
+    if (clickable)
+        ex &= ~WS_EX_TRANSPARENT;
+    else
+        ex |= WS_EX_TRANSPARENT;
+    SetWindowLongPtr(g_hwnd, GWL_EXSTYLE, ex);
 }
 
 void overlay_bi::ForceTopMost()
@@ -535,7 +550,7 @@ float overlay_bi::measureLayout(const std::vector<hud_element_bi> &elements) con
         }
         else
         {
-            y += layout.graphTopNudge + layout.graphHeight + layout.graphGap;
+            y += layout.graphTopNudge + layout.graphHeight * graphHeightMultiplier + layout.graphGap;
             lastWasGraph = true;
         }
     }
@@ -718,7 +733,7 @@ void overlay_bi::Render()
         else
         {
             float top = y + layout.graphTopNudge;
-            float axisY = top + layout.graphHeight;
+            float axisY = top + layout.graphHeight * graphHeightMultiplier;
 
             drawOneGraph(el.graph, top, axisY);
 

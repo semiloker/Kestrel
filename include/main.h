@@ -16,9 +16,12 @@
 #include "overlay_bi.h"
 #include "resource_usage_bi.h"
 #include "capture_bi.h"
+#include "capture_manager_bi.h"
 #include "etw_bi.h"
 #include "frame_stats_bi.h"
+#include "hotkey_manager_bi.h"
 #include "settings_bi.h"
+#include "tray_icon_bi.h"
 #include "update_bi.h"
 
 class win_bi
@@ -73,13 +76,15 @@ private:
 
     void ToggleOverlay();
     void SaveSettings();
+    void RunStartupWizard();  // UX-08: guided first-run
     void RunAction(int action);
     draw_batteryinfo_bi::diag_bi BuildDiagnostics();
 
-    static const char szClassName[];
+    HotkeyManager hotkeys;
+    capture_manager_bi captureMgr;
+    tray_icon_bi trayIcon;
 
-    NOTIFYICONDATA nid;
-    bool trayIconVisible = false;
+    static const char szClassName[];
 
     HINSTANCE hInstance;
     HWND hwnd;
@@ -104,11 +109,16 @@ private:
     settings_bi settings;
 
     DWORD hudTargetPid = 0;
+    DWORD lastProfilePid = 0;
+    std::string currentProfileExe;
 
     DWORD hudApiPid = 0;
     const char *hudApiName = "-";
 
     DWORD lastFrameDataTick = 0;
+    DWORD lastEtwRestartTick = 0;
+    DWORD lastSlowSensorTick = 0;
+    bool firstRun_ = false;
 
     unsigned hudTick = 0;
     double lastGpuMsPerFrame = 0.0;
@@ -125,17 +135,10 @@ private:
 
     void collectFrames();
     void UpdateDerivedMetrics();
-    void ToggleCapture();
     draw_batteryinfo_bi::capture_view_bi BuildCaptureView();
 
     std::string cachedBackupVersion;
     bool backupVersionLoaded = false;
-
-    capture_bi capture;
-    capture_bi::summary_bi lastCapture;
-    bool haveLastCapture = false;
-    std::vector<capture_bi::summary_bi> captureHistory;
-    bool captureHistoryLoaded = false;
 };
 
 #endif

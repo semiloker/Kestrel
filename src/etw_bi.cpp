@@ -66,10 +66,12 @@ etw_bi::etw_bi()
       consumerHandle(0),
       thread(NULL),
       sessionActive(false),
+      failed(false),
       isElevated(false),
       deepCensus(false),
       failReason("not started"),
       targetPid(0),
+      configuredApi(API_NONE),
       sourceCount(0),
       reportedPid(0),
       reportedSource(-1),
@@ -324,6 +326,102 @@ void etw_bi::setFallbackSource(provider_bi provider, unsigned eventId)
                   providerName(provider), eventId);
 }
 
+void etw_bi::autoConfigForApi(api_bi api)
+{
+    if (api == configuredApi || api == API_NONE)
+        return;
+
+    configuredApi = api;
+
+    EnterCriticalSection(&lock);
+
+    switch (api)
+    {
+    case API_D3D9:
+        if (sourceCount < ETW_MAX_SOURCES)
+        {
+            sources[sourceCount].provider = PROV_D3D9;
+            sources[sourceCount].eventId = 1;
+            sources[sourceCount].name = "D3D9 Present";
+            ++sourceCount;
+        }
+        break;
+
+    case API_D3D11:
+    case API_D3D12:
+        if (sourceCount < ETW_MAX_SOURCES)
+        {
+            sources[sourceCount].provider = PROV_DXGI;
+            sources[sourceCount].eventId = 42;
+            sources[sourceCount].name = "DXGI Present";
+            ++sourceCount;
+        }
+        if (sourceCount < ETW_MAX_SOURCES)
+        {
+            sources[sourceCount].provider = PROV_DXGI;
+            sources[sourceCount].eventId = 144;
+            sources[sourceCount].name = "DXGI MPO Present";
+            ++sourceCount;
+        }
+        break;
+
+    case API_OPENGL:
+        if (sourceCount < ETW_MAX_SOURCES)
+        {
+            sources[sourceCount].provider = PROV_DXGI;
+            sources[sourceCount].eventId = 42;
+            sources[sourceCount].name = "OpenGL DXGI Present";
+            ++sourceCount;
+        }
+        if (sourceCount < ETW_MAX_SOURCES)
+        {
+            sources[sourceCount].provider = PROV_DXGI;
+            sources[sourceCount].eventId = 144;
+            sources[sourceCount].name = "OpenGL DXGI MPO";
+            ++sourceCount;
+        }
+        if (sourceCount < ETW_MAX_SOURCES)
+        {
+            sources[sourceCount].provider = PROV_DXGKRNL;
+            sources[sourceCount].eventId = 166;
+            sources[sourceCount].name = "OpenGL Blit";
+            ++sourceCount;
+        }
+        break;
+
+    case API_VULKAN:
+        if (sourceCount < ETW_MAX_SOURCES)
+        {
+            sources[sourceCount].provider = PROV_DXGI;
+            sources[sourceCount].eventId = 42;
+            sources[sourceCount].name = "Vulkan DXGI Present";
+            ++sourceCount;
+        }
+        if (sourceCount < ETW_MAX_SOURCES)
+        {
+            sources[sourceCount].provider = PROV_DXGI;
+            sources[sourceCount].eventId = 144;
+            sources[sourceCount].name = "Vulkan DXGI MPO";
+            ++sourceCount;
+        }
+        if (sourceCount < ETW_MAX_SOURCES)
+        {
+            sources[sourceCount].provider = PROV_DXGKRNL;
+            sources[sourceCount].eventId = 168;
+            sources[sourceCount].name = "Vulkan Flip";
+            ++sourceCount;
+        }
+        break;
+
+    default:
+        break;
+    }
+
+    LeaveCriticalSection(&lock);
+
+    log_bi::write("etw: auto-configured sources for %s", apiName(api));
+}
+
 void etw_bi::setTarget(DWORD processId)
 {
     targetPid = processId;
@@ -454,8 +552,12 @@ DWORD WINAPI etw_bi::traceThread(LPVOID param)
     ULONG status = ProcessTrace(&self->consumerHandle, 1, NULL, NULL);
 
     if (self->sessionActive)
+    {
         log_bi::writeErr(status, "etw: ProcessTrace returned while session was still active, "
-                                 "no further frame events will arrive");
+                                 "restart needed");
+        self->failed = true;
+        self->sessionActive = false;
+    }
 
     return 0;
 }
@@ -538,6 +640,7 @@ bool etw_bi::start()
     }
 
     sessionActive = true;
+    failed = false;
     failReason = "";
 
     thread = CreateThread(NULL, 0, traceThread, this, 0, NULL);

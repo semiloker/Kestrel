@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdarg>
 #include <string>
+#include <format>
 
 namespace
 {
@@ -13,12 +14,13 @@ namespace
     CRITICAL_SECTION g_lock;
     bool g_lockReady = false;
 
-    void stamp(char *buf, size_t n)
+    std::string stamp()
     {
         SYSTEMTIME st;
         GetLocalTime(&st);
-        snprintf(buf, n, "%02u:%02u:%02u.%03u",
-                 st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+        return std::format("{:02}:{:02}:{:02}.{:03}",
+                           (unsigned)st.wHour, (unsigned)st.wMinute,
+                           (unsigned)st.wSecond, (unsigned)st.wMilliseconds);
     }
 
     void emit(const char *line)
@@ -26,11 +28,10 @@ namespace
         if (!g_file)
             return;
 
-        char ts[32];
-        stamp(ts, sizeof(ts));
+        std::string ts = stamp();
 
         EnterCriticalSection(&g_lock);
-        fprintf(g_file, "[%s] %s\n", ts, line);
+        fprintf(g_file, "[%s] %s\n", ts.c_str(), line);
         fflush(g_file);
         LeaveCriticalSection(&g_lock);
     }
@@ -118,8 +119,11 @@ void log_bi::writeErr(unsigned long code, const char *fmt, ...)
     if (text)
         LocalFree(text);
 
-    snprintf(line + n, sizeof(line) - (size_t)n, " [0x%08lX: %s]",
-             code, detail.empty() ? "no description" : detail.c_str());
+    std::string suffix = std::format(" [0x{:08X}: {}]",
+                                     code, detail.empty() ? "no description" : detail);
+    size_t remain = sizeof(line) - (size_t)n - 1;
+    strncpy(line + n, suffix.c_str(), remain);
+    line[sizeof(line) - 1] = '\0';
 
     emit(line);
 }

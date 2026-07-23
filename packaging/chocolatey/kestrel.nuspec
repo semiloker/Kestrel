@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>kestrel</id>
+    <version>1.4.0</version>
+    <title>Kestrel</title>
+    <authors>semiloker</authors>
+    <projectUrl>https://github.com/semiloker/Kestrel</projectUrl>
+    <licenseUrl>https://github.com/semiloker/Kestrel/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectSourceUrl>https://github.com/semiloker/Kestrel</projectSourceUrl>
+    <bugTrackerUrl>https://github.com/semiloker/Kestrel/issues</bugTrackerUrl>
+    <tags>overlay fps frame-time battery monitoring gaming etw portable</tags>
+    <summary>Battery, system and frame-time overlay for Windows.</summary>
+    <description>
+Kestrel is a single portable executable that shows battery health, CPU/GPU load,
+package power, and real per-application frame timing via ETW in an always-on-top
+overlay. Zero-install, no drivers.
+    </description>
+    <releaseNotes>https://github.com/semiloker/Kestrel/releases/tag/v1.4.0</releaseNotes>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

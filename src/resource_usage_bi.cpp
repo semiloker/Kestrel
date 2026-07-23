@@ -4,21 +4,20 @@
 #include <cctype>
 #include <cstring>
 #include <cwchar>
+#include <format>
+
+#include <wbemidl.h>
 
 static void formatMegabytes(std::string &out, ULONGLONG bytes, int unit)
 {
-    char buf[48];
-
     bool useGb = (unit == resource_usage_bi::MEM_UNIT_GB) ||
                  (unit == resource_usage_bi::MEM_UNIT_AUTO &&
                   bytes >= (1024ULL * 1024ULL * 1024ULL));
 
     if (useGb)
-        snprintf(buf, sizeof(buf), "%.2f GB", (double)bytes / (1024.0 * 1024.0 * 1024.0));
+        out = std::format("{:.2f} GB", (double)bytes / (1024.0 * 1024.0 * 1024.0));
     else
-        snprintf(buf, sizeof(buf), "%llu MB", (unsigned long long)(bytes / DIV));
-
-    out = buf;
+        out = std::format("{} MB", (unsigned long long)(bytes / DIV));
 }
 
 bool resource_usage_bi::updateRam()
@@ -45,9 +44,7 @@ bool resource_usage_bi::updateRam()
     ramInfo.usedGB = static_cast<double>(statex.ullTotalPhys - statex.ullAvailPhys) /
                      (1024.0 * 1024.0 * 1024.0);
 
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%lu %%", (unsigned long)statex.dwMemoryLoad);
-    ramInfo.dwMemoryLoad = buf;
+    ramInfo.dwMemoryLoad = std::format("{}%", (unsigned long)statex.dwMemoryLoad);
 
     if (ramInfo.show_ullTotalPhys)
         formatMegabytes(ramInfo.ullTotalPhys, statex.ullTotalPhys, memUnit);
@@ -159,11 +156,8 @@ bool resource_usage_bi::updateNetwork()
             double down = (double)octetDelta(row.dwInOctets, previous.in) / 1024.0 / seconds;
             double up = (double)octetDelta(row.dwOutOctets, previous.out) / 1024.0 / seconds;
 
-            char buf[64];
-            snprintf(buf, sizeof(buf), "%.1f KB/s", down);
-            netInfo.downloadSpeed = buf;
-            snprintf(buf, sizeof(buf), "%.1f KB/s", up);
-            netInfo.uploadSpeed = buf;
+            netInfo.downloadSpeed = std::format("{:.1f} KB/s", down);
+            netInfo.uploadSpeed = std::format("{:.1f} KB/s", up);
         }
         else
         {
@@ -312,9 +306,7 @@ bool resource_usage_bi::updateCpu()
 
     cpuInfo.UsageValue = value.doubleValue;
 
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%.2f %%", cpuInfo.UsageValue);
-    cpuInfo.UsagePercent = buf;
+    cpuInfo.UsagePercent = std::format("{:.2f}%", cpuInfo.UsageValue);
 
     if (!cpuInfo.show_CoreUsagePercents)
         return true;
@@ -332,8 +324,7 @@ bool resource_usage_bi::updateCpu()
                 ERROR_SUCCESS &&
             core.CStatus == ERROR_SUCCESS)
         {
-            snprintf(buf, sizeof(buf), "%.2f %%", core.doubleValue);
-            cpuInfo.CoreUsagePercents[i] = buf;
+            cpuInfo.CoreUsagePercents[i] = std::format("{:.2f}%", core.doubleValue);
         }
         else
         {
@@ -369,7 +360,7 @@ void resource_usage_bi::initGpuInfo()
     IDXGIFactory1 *factory = NULL;
     if (SUCCEEDED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void **)&factory)) && factory)
     {
-        SIZE_T best = 0;
+        SIZE_T totalDedicated = 0;
 
         for (UINT i = 0;; ++i)
         {
@@ -383,15 +374,33 @@ void resource_usage_bi::initGpuInfo()
             {
                 bool software = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
 
-                if (!software && desc.DedicatedVideoMemory > best)
-                    best = desc.DedicatedVideoMemory;
+                if (software)
+                {
+                    adapter->Release();
+                    continue;
+                }
+
+                SIZE_T mem = desc.DedicatedVideoMemory;
+                if (mem == 0)
+                    mem = desc.DedicatedSystemMemory + desc.SharedSystemMemory;
+
+                totalDedicated += mem;
+
+                AdapterInfo ai;
+                char nameBuf[256];
+                int len = WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1,
+                                              nameBuf, sizeof(nameBuf), NULL, NULL);
+                if (len > 0)
+                    ai.adapterName = nameBuf;
+                ai.totalVramMB = (double)mem / (1024.0 * 1024.0);
+                adapters.push_back(ai);
             }
 
             adapter->Release();
         }
 
-        if (best > 0)
-            gpuInfo.vramTotalMB = (double)best / (1024.0 * 1024.0);
+        if (totalDedicated > 0)
+            gpuInfo.vramTotalMB = (double)totalDedicated / (1024.0 * 1024.0);
 
         factory->Release();
     }
@@ -450,6 +459,7 @@ void resource_usage_bi::publishSample(double gpuBusyMs, bool gpuBusyValid)
     pubCpu = cpuInfo;
     pubRam = ramInfo;
     pubGpu = gpuInfo;
+    pubAdapters = adapters;
     pubGpuBusyMs = gpuBusyMs;
     pubGpuBusyValid = gpuBusyValid;
 
@@ -457,7 +467,8 @@ void resource_usage_bi::publishSample(double gpuBusyMs, bool gpuBusyValid)
 }
 
 void resource_usage_bi::readSnapshot(CpuInfo *cpu, RamInfo *ram, GpuInfo *gpu,
-                                     double *gpuBusyMs, bool *gpuBusyValid)
+                                     double *gpuBusyMs, bool *gpuBusyValid,
+                                     std::vector<AdapterInfo> *adaptersOut)
 {
     if (!publishLockReady)
         return;
@@ -474,6 +485,8 @@ void resource_usage_bi::readSnapshot(CpuInfo *cpu, RamInfo *ram, GpuInfo *gpu,
         *gpuBusyMs = pubGpuBusyMs;
     if (gpuBusyValid)
         *gpuBusyValid = pubGpuBusyValid;
+    if (adaptersOut)
+        *adaptersOut = pubAdapters;
 
     LeaveCriticalSection(&publishLock);
 }
@@ -517,6 +530,8 @@ void resource_usage_bi::startSampler(int intervalMs)
         return;
     }
 
+    SetThreadPriority(samplerThread, THREAD_PRIORITY_BELOW_NORMAL);
+
     log_bi::write("sampler: worker started at %d ms", intervalMs);
 }
 
@@ -543,6 +558,8 @@ void resource_usage_bi::stopSampler()
 bool resource_usage_bi::updateGpuMemory()
 {
     gpuInfo.vramAvailable = false;
+    for (auto &a : adapters)
+        a.available = false;
 
     if (!sharedCollected || vramCounter == NULL)
         return false;
@@ -565,13 +582,31 @@ bool resource_usage_bi::updateGpuMemory()
 
     LONGLONG total = 0;
 
+    if (itemCount > adapters.size())
+        adapters.resize(itemCount);
+
     for (DWORD i = 0; i < itemCount; ++i)
     {
         if (items[i].FmtValue.CStatus != ERROR_SUCCESS)
             continue;
 
-        if (items[i].FmtValue.largeValue > 0)
-            total += items[i].FmtValue.largeValue;
+        LONGLONG val = items[i].FmtValue.largeValue;
+
+        if (val > 0)
+        {
+            total += val;
+            adapters[i].usedVramMB = (double)val / (1024.0 * 1024.0);
+            adapters[i].available = true;
+
+            if (adapters[i].adapterName.empty())
+            {
+                char buf[256];
+                int len = WideCharToMultiByte(CP_UTF8, 0, items[i].szName, -1,
+                                              buf, sizeof(buf), NULL, NULL);
+                if (len > 0)
+                    adapters[i].adapterName = buf;
+            }
+        }
     }
 
     if (total <= 0)
@@ -669,10 +704,7 @@ bool resource_usage_bi::updateCpuPower()
     {
         gpuInfo.gpuPowerW = gpuMilliwatts / 1000.0;
         gpuInfo.gpuPowerAvailable = true;
-
-        char gbuf[32];
-        snprintf(gbuf, sizeof(gbuf), "%.2f W", gpuInfo.gpuPowerW);
-        gpuInfo.gpuPower = gbuf;
+        gpuInfo.gpuPower = std::format("{:.2f} W", gpuInfo.gpuPowerW);
     }
 
     if (packageMilliwatts < 0.0)
@@ -695,12 +727,111 @@ bool resource_usage_bi::updateCpuPower()
 
     cpuInfo.packagePowerW = packageMilliwatts / 1000.0;
     cpuInfo.packagePowerAvailable = true;
-
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%.2f W", cpuInfo.packagePowerW);
-    cpuInfo.packagePower = buf;
+    cpuInfo.packagePower = std::format("{:.2f} W", cpuInfo.packagePowerW);
 
     return true;
+}
+
+bool resource_usage_bi::updateTemps()
+{
+    cpuInfo.cpuTempAvailable = false;
+    gpuInfo.gpuTempAvailable = false;
+
+    HRESULT hres = CoInitializeEx(0, COINIT_MULTITHREADED);
+    if (FAILED(hres) && hres != RPC_E_CHANGED_MODE)
+        return false;
+
+    IWbemLocator *pLoc = nullptr;
+    hres = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER,
+                            IID_IWbemLocator, (LPVOID *)&pLoc);
+    if (FAILED(hres))
+    {
+        CoUninitialize();
+        return false;
+    }
+
+    IWbemServices *pSvc = nullptr;
+    BSTR ns = SysAllocString(L"ROOT\\WMI");
+    hres = pLoc->ConnectServer(ns, NULL, NULL, NULL, 0, NULL, NULL, &pSvc);
+    SysFreeString(ns);
+
+    if (FAILED(hres))
+    {
+        pLoc->Release();
+        CoUninitialize();
+        return false;
+    }
+
+    hres = CoSetProxyBlanket(pSvc, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, NULL,
+                             RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
+                             NULL, EOAC_NONE);
+    if (FAILED(hres))
+    {
+        pSvc->Release();
+        pLoc->Release();
+        CoUninitialize();
+        return false;
+    }
+
+    BSTR lang = SysAllocString(L"WQL");
+    BSTR query = SysAllocString(L"SELECT * FROM MSAcpi_ThermalZoneTemperature");
+    IEnumWbemClassObject *pEnum = nullptr;
+    hres = pSvc->ExecQuery(lang, query,
+                           WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
+                           NULL, &pEnum);
+    SysFreeString(lang);
+    SysFreeString(query);
+
+    if (SUCCEEDED(hres) && pEnum)
+    {
+        IWbemClassObject *pObj = nullptr;
+        ULONG ret = 0;
+
+        while (pEnum->Next(10000, 1, &pObj, &ret) == S_OK)
+        {
+            VARIANT vt;
+            VariantInit(&vt);
+
+            if (SUCCEEDED(pObj->Get(L"CurrentTemperature", 0, &vt, 0, 0)) &&
+                vt.vt == VT_I4)
+            {
+                double tempC = ((int)vt.uintVal - 2732) / 10.0;
+
+                VARIANT inst;
+                VariantInit(&inst);
+                std::string name = "CPU";
+                if (SUCCEEDED(pObj->Get(L"InstanceName", 0, &inst, 0, 0)) &&
+                    inst.vt == VT_BSTR)
+                {
+                    char buf[256];
+                    WideCharToMultiByte(CP_UTF8, 0, inst.bstrVal, -1, buf, sizeof(buf), NULL, NULL);
+                    name = buf;
+                }
+                VariantClear(&inst);
+
+                if (name.find("CPU") != std::string::npos || name.find("cpu") != std::string::npos ||
+                    name.find("CPUZ") != std::string::npos)
+                {
+                    cpuInfo.cpuTempC = tempC;
+                    cpuInfo.cpuTempAvailable = true;
+                }
+                else
+                {
+                    gpuInfo.gpuTempC = tempC;
+                    gpuInfo.gpuTempAvailable = true;
+                }
+            }
+            VariantClear(&vt);
+            pObj->Release();
+        }
+        pEnum->Release();
+    }
+
+    pSvc->Release();
+    pLoc->Release();
+    CoUninitialize();
+
+    return cpuInfo.cpuTempAvailable || gpuInfo.gpuTempAvailable;
 }
 
 bool resource_usage_bi::updateGpuTime(DWORD pid, double *busyMsOut)
@@ -794,10 +925,7 @@ bool resource_usage_bi::updateGpuTime(DWORD pid, double *busyMsOut)
             load = 100.0;
 
         gpuInfo.gpuLoadValue = load;
-
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%.2f %%", load);
-        gpuInfo.gpuLoad = buf;
+        gpuInfo.gpuLoad = std::format("{:.2f}%", load);
     }
 
     if (pid == 0)

@@ -3,7 +3,7 @@ SHELL := cmd.exe
 .SHELLFLAGS := /C
 endif
 
-TARGET   = bin\kestrel.exe
+TARGET   = bin\Kestrel.exe
 
 CC       = g++
 WINDRES  = windres
@@ -13,7 +13,7 @@ INCLUDE_DIR = include
 OBJ_DIR     = obj
 BIN_DIR     = bin
 
-CXXFLAGS = -Wall -O2 -MMD -MP -I$(INCLUDE_DIR)
+CXXFLAGS = -std=c++20 -Wall -O2 -MMD -MP -I$(INCLUDE_DIR)
 LDFLAGS  = -mwindows -static -static-libgcc -static-libstdc++
 
 SRC = $(wildcard $(SRC_DIR)/*.cpp)
@@ -26,7 +26,7 @@ RES_OBJ = $(OBJ_DIR)/app_rc.o
 LIBS = -lwbemuuid -lole32 -loleaut32 -loleacc -luuid \
        -lgdi32 -lshell32 -lsetupapi -ld2d1 -ldwrite \
        -ldwmapi -lpdh -liphlpapi -ladvapi32 -lwinpthread -lpsapi \
-       -ltaskschd -lshlwapi -luser32 -lwinhttp -lversion -ldxgi
+       -ltaskschd -lshlwapi -luser32 -lcomctl32 -lwinhttp -lversion -ldxgi
 
 all: $(TARGET)
 

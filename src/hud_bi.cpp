@@ -3,6 +3,7 @@
 #include <dwmapi.h>
 #include <cstdio>
 #include <algorithm>
+#include <format>
 
 hud_series_bi::hud_series_bi(size_t capacity)
     : data(capacity > 0 ? capacity : 1, 0.0),
@@ -147,6 +148,24 @@ hud_bi::hud_bi()
     metrics[HUD_M_BATTERYD].graph = HUD_G_BATTERY;
     metrics[HUD_M_BATTERYD].show = false;
     metrics[HUD_M_BATTERYD].graphed = true;
+
+    metrics[HUD_M_NETDOWN].label = "Dw:";
+    metrics[HUD_M_NETDOWN].unit = "KB/s";
+    metrics[HUD_M_NETDOWN].color = HUD_COLOR_CYAN;
+    metrics[HUD_M_NETDOWN].graph = HUD_G_NONE;
+    metrics[HUD_M_NETDOWN].show = false;
+
+    metrics[HUD_M_NETUP].label = "Up:";
+    metrics[HUD_M_NETUP].unit = "KB/s";
+    metrics[HUD_M_NETUP].color = HUD_COLOR_MAGENTA;
+    metrics[HUD_M_NETUP].graph = HUD_G_NONE;
+    metrics[HUD_M_NETUP].show = false;
+
+    metrics[HUD_M_DISK].label = "Dsk:";
+    metrics[HUD_M_DISK].unit = "%";
+    metrics[HUD_M_DISK].color = HUD_COLOR_ORANGE;
+    metrics[HUD_M_DISK].graph = HUD_G_NONE;
+    metrics[HUD_M_DISK].show = false;
 }
 
 void hud_bi::initStaticInfo(const std::string &adapterName)
@@ -168,8 +187,6 @@ void hud_bi::setApi(const char *name)
 
 void hud_bi::updateForeground(HWND foreground)
 {
-    char buf[128];
-
     HMONITOR mon = MonitorFromWindow(foreground ? foreground : GetDesktopWindow(),
                                      MONITOR_DEFAULTTOPRIMARY);
 
@@ -214,8 +231,7 @@ void hud_bi::updateForeground(HWND foreground)
         if (hz != cachedHz || refreshLine.empty())
         {
             cachedHz = hz;
-            snprintf(buf, sizeof(buf), "[%luHz]", hz);
-            refreshLine = buf;
+            refreshLine = std::format("[{}Hz]", hz);
         }
     }
 
@@ -254,8 +270,7 @@ void hud_bi::updateForeground(HWND foreground)
         cachedWinW = winW;
         cachedWinH = winH;
 
-        snprintf(buf, sizeof(buf), "[%ldx%ld]", winW, winH);
-        resolution = buf;
+        resolution = std::format("[{}x{}]", winW, winH);
     }
 
     double scale = (monW > 0) ? (double)winW / (double)monW : 1.0;
@@ -267,11 +282,10 @@ void hud_bi::updateForeground(HWND foreground)
         cachedComposited = composited;
         cachedApiLabel = apiLabel;
 
-        snprintf(buf, sizeof(buf), "%.2fx %s %s",
-                 scale,
-                 composited ? "Composited" : "Direct",
-                 apiLabel.c_str());
-        scaleLine = buf;
+        scaleLine = std::format("{:.2f}x {} {}",
+                                scale,
+                                composited ? "Composited" : "Direct",
+                                apiLabel);
     }
 }
 
@@ -349,12 +363,6 @@ static double clampDisplay(double v)
     return v;
 }
 
-static void fmtLeft(char *buf, size_t n, const char *label, const char *value,
-                    const char *unit)
-{
-    snprintf(buf, n, "%-4s %6s %-2s", label, value, unit);
-}
-
 static double clampField(double value, int decimals)
 {
     double high = 999999.0;
@@ -379,65 +387,63 @@ static double clampField(double value, int decimals)
     return value;
 }
 
-static void formatFixed(char *buf, size_t n, double value, int decimals)
+static std::string formatFixed(double value, int decimals)
 {
     double v = clampField(value, decimals);
 
     if (decimals <= 0)
-        snprintf(buf, n, "%.0f", v);
-    else if (decimals == 1)
-        snprintf(buf, n, "%.1f", v);
-    else
-        snprintf(buf, n, "%.2f", v);
+        return std::format("{:.0f}", v);
+    if (decimals == 1)
+        return std::format("{:.1f}", v);
+    return std::format("{:.2f}", v);
 }
 
-static void fmtLeftNum(char *buf, size_t n, const char *label, double value,
-                       int decimals, const char *unit)
+static std::string fmtLeft(const char *label, const char *value, const char *unit)
 {
-    char text[64];
-    formatFixed(text, sizeof(text), value, decimals);
-    fmtLeft(buf, n, label, text, unit);
+    return std::format("{:<4} {:>6} {:<2}", label, value, unit);
 }
 
-static void fmtRight(char *buf, size_t n, const char *a, const char *b)
+static std::string fmtLeftNum(const char *label, double value, int decimals, const char *unit)
 {
-    snprintf(buf, n, "[%6s %6s]", a, b);
+    return fmtLeft(label, formatFixed(value, decimals).c_str(), unit);
 }
 
-static void fmtRightPhrase(char *buf, size_t n, const char *phrase)
+static std::string fmtRight(const char *a, const char *b)
 {
-    snprintf(buf, n, "[%13s]", phrase);
+    return std::format("[{:>6} {:>6}]", a, b);
 }
 
-static void fmtRightTotalPct(char *buf, size_t n, double total, int decimals, double percent)
+static std::string fmtRightPhrase(const char *phrase)
 {
-    char text[64];
-    formatFixed(text, sizeof(text), total, decimals);
+    return std::format("[{:>13}]", phrase);
+}
+
+static std::string fmtRightTotalPct(double total, int decimals, double percent)
+{
+    std::string text = formatFixed(total, decimals);
 
     if (percent > 999.9)
         percent = 999.9;
     if (percent < 0.0)
         percent = 0.0;
 
-    snprintf(buf, n, "[%6s %5.1f%%]", text, percent);
+    return std::format("[{:>6} {:5.1f}%]", text, percent);
 }
 
-static void formatMetricLeft(const hud_metric_bi &m, char *buf, size_t n)
+static std::string formatMetricLeft(const hud_metric_bi &m)
 {
     if (!m.available || m.series.size() == 0)
-        snprintf(buf, n, "%-4s %6s %-2s", m.label, "-", m.unit);
-    else
-        snprintf(buf, n, "%-4s %6.2f %-2s", m.label,
-                 clampDisplay(m.series.current()), m.unit);
+        return std::format("{:<4} {:>6} {:<2}", m.label, "-", m.unit);
+    return std::format("{:<4} {:6.2f} {:<2}", m.label,
+                       clampDisplay(m.series.current()), m.unit);
 }
 
-static void formatMetricRight(const hud_metric_bi &m, char *buf, size_t n)
+static std::string formatMetricRight(const hud_metric_bi &m)
 {
     if (!m.available || m.series.size() == 0)
-        snprintf(buf, n, "[%6s %6s]", "-", "-");
-    else
-        snprintf(buf, n, "[%6.2f %6.2f]",
-                 clampDisplay(m.series.minimum()), clampDisplay(m.series.maximum()));
+        return std::format("[{:>6} {:>6}]", "-", "-");
+    return std::format("[{:6.2f} {:6.2f}]",
+                       clampDisplay(m.series.minimum()), clampDisplay(m.series.maximum()));
 }
 
 static hud_element_bi &nextElement(std::vector<hud_element_bi> &out, size_t &n)
@@ -446,16 +452,6 @@ static hud_element_bi &nextElement(std::vector<hud_element_bi> &out, size_t &n)
         out.resize(n + 1);
 
     return out[n++];
-}
-
-static void pushRow(std::vector<hud_element_bi> &out, size_t &n, const char *left,
-                    const char *right, hud_color_bi color)
-{
-    hud_element_bi &el = nextElement(out, n);
-    el.kind = HUD_EL_ROW;
-    el.row.left = left;
-    el.row.right = right;
-    el.row.color = color;
 }
 
 static void pushRow(std::vector<hud_element_bi> &out, size_t &n, const std::string &left,
@@ -479,23 +475,30 @@ void hud_bi::buildLayoutInto(std::vector<hud_element_bi> &out) const
 {
     size_t n = 0;
 
-    char left[64];
-    char right[64];
+    auto eachMetric = [&](auto fn) {
+        if (metricOrder.empty())
+        {
+            for (int i = 0; i < HUD_M_COUNT; ++i)
+                fn(i);
+        }
+        else
+        {
+            for (size_t oi = 0; oi < metricOrder.size(); ++oi)
+                if (metricOrder[oi] >= 0 && metricOrder[oi] < HUD_M_COUNT)
+                    fn(metricOrder[oi]);
+        }
+    };
 
     if (capturing)
     {
         int mins = (int)(captureSeconds / 60.0);
         int secs = (int)captureSeconds % 60;
 
-        char clock[24];
-        char frames[24];
+        std::string clock = std::format("{}:{:02d}", mins, secs);
+        std::string frames = std::format("{}", (unsigned)captureFrames);
 
-        snprintf(clock, sizeof(clock), "%d:%02d", mins, secs);
-        snprintf(frames, sizeof(frames), "%u", (unsigned)captureFrames);
-
-        fmtLeft(left, sizeof(left), "REC:", clock, "");
-        fmtRight(right, sizeof(right), frames, "frames");
-        pushRow(out, n, left, right, HUD_COLOR_RED);
+        pushRow(out, n, fmtLeft("REC:", clock.c_str(), ""),
+                fmtRight(frames.c_str(), "frames"), HUD_COLOR_RED);
     }
 
     if (showCpuName && !cpuName.empty())
@@ -514,34 +517,23 @@ void hud_bi::buildLayoutInto(std::vector<hud_element_bi> &out) const
     {
         hud_graph_id_bi group = (hud_graph_id_bi)g;
 
-        for (int i = 0; i < HUD_M_COUNT; ++i)
-        {
+        eachMetric([&](int i) {
             const hud_metric_bi &m = metrics[i];
             if (m.graph != group || !m.show)
-                continue;
+                return;
 
-            formatMetricLeft(m, left, sizeof(left));
-            formatMetricRight(m, right, sizeof(right));
-            pushRow(out, n, left, right, m.color);
+            pushRow(out, n, formatMetricLeft(m), formatMetricRight(m), m.color);
 
             if (i == HUD_M_FPS && showLows)
             {
-                char one[24];
-                char tenth[24];
+                std::string one = (m.available && low1Valid)
+                    ? formatFixed(clampDisplay(low1PercentFps), 1) : "-";
 
-                if (m.available && low1Valid)
-                    snprintf(one, sizeof(one), "%.1f", clampDisplay(low1PercentFps));
-                else
-                    snprintf(one, sizeof(one), "%s", "-");
+                std::string tenth = (m.available && low01Valid)
+                    ? formatFixed(clampDisplay(low01PercentFps), 1) : "-";
 
-                if (m.available && low01Valid)
-                    snprintf(tenth, sizeof(tenth), "%.1f", clampDisplay(low01PercentFps));
-                else
-                    snprintf(tenth, sizeof(tenth), "%s", "-");
-
-                fmtLeft(left, sizeof(left), "Low:", "1/0.1", "%");
-                fmtRight(right, sizeof(right), one, tenth);
-                pushRow(out, n, left, right, HUD_COLOR_WHITE);
+                pushRow(out, n, fmtLeft("Low:", "1/0.1", "%"),
+                        fmtRight(one.c_str(), tenth.c_str()), HUD_COLOR_WHITE);
             }
 
             if (i == HUD_M_FPS && showBottleneck)
@@ -568,30 +560,22 @@ void hud_bi::buildLayoutInto(std::vector<hud_element_bi> &out) const
                 }
 
                 if (known)
-                {
-                    fmtLeftNum(left, sizeof(left), "Bnd:", bottleneckRatio * 100.0, 0, "%");
-                }
+                    pushRow(out, n, fmtLeftNum("Bnd:", bottleneckRatio * 100.0, 0, "%"),
+                            fmtRightPhrase(phrase), tone);
                 else
-                {
-                    fmtLeft(left, sizeof(left), "Bnd:", "-", "");
-                    tone = HUD_COLOR_WHITE;
-                }
-
-                fmtRightPhrase(right, sizeof(right), phrase);
-                pushRow(out, n, left, right, tone);
+                    pushRow(out, n, fmtLeft("Bnd:", "-", ""),
+                            fmtRightPhrase(phrase), HUD_COLOR_WHITE);
             }
 
             if (i == HUD_M_CPUW && showEfficiency)
             {
-                if (efficiencyValid)
-                    fmtLeftNum(left, sizeof(left), "Eff:", efficiencyFpsPerWatt, 2, "");
-                else
-                    fmtLeft(left, sizeof(left), "Eff:", "-", "");
+                std::string left = efficiencyValid
+                    ? fmtLeftNum("Eff:", efficiencyFpsPerWatt, 2, "")
+                    : fmtLeft("Eff:", "-", "");
 
-                fmtRightPhrase(right, sizeof(right), "frames per W");
-                pushRow(out, n, left, right, HUD_COLOR_ORANGE);
+                pushRow(out, n, left, fmtRightPhrase("frames per W"), HUD_COLOR_ORANGE);
             }
-        }
+        });
 
         if (graphHasContent(group))
         {
@@ -603,68 +587,79 @@ void hud_bi::buildLayoutInto(std::vector<hud_element_bi> &out) const
         }
     }
 
-    for (int i = 0; i < HUD_M_COUNT; ++i)
-    {
+    eachMetric([&](int i) {
         const hud_metric_bi &m = metrics[i];
         if (m.graph != HUD_G_NONE || !m.show)
-            continue;
+            return;
 
-        formatMetricLeft(m, left, sizeof(left));
-        formatMetricRight(m, right, sizeof(right));
-        pushRow(out, n, left, right, m.color);
-    }
+        pushRow(out, n, formatMetricLeft(m), formatMetricRight(m), m.color);
+    });
 
     if (showMem)
     {
-        fmtLeftNum(left, sizeof(left), "Mem:", memUsedGB, 2, "GB");
-
         if (memTotalGB > 0.0)
-            fmtRightTotalPct(right, sizeof(right), memTotalGB, 2,
-                             (memUsedGB / memTotalGB) * 100.0);
+            pushRow(out, n, fmtLeftNum("Mem:", memUsedGB, 2, "GB"),
+                    fmtRightTotalPct(memTotalGB, 2, (memUsedGB / memTotalGB) * 100.0),
+                    HUD_COLOR_WHITE);
         else
-            fmtRight(right, sizeof(right), "-", "-");
-
-        pushRow(out, n, left, right, HUD_COLOR_WHITE);
+            pushRow(out, n, fmtLeftNum("Mem:", memUsedGB, 2, "GB"),
+                    fmtRight("-", "-"), HUD_COLOR_WHITE);
     }
 
     if (showVram)
     {
         if (vramAvailable)
         {
-            fmtLeftNum(left, sizeof(left), "VRM:", vramUsedMB, 0, "MB");
-
             if (vramTotalMB > 0.0)
-                fmtRightTotalPct(right, sizeof(right), vramTotalMB, 0,
-                                 (vramUsedMB / vramTotalMB) * 100.0);
+                pushRow(out, n, fmtLeftNum("VRM:", vramUsedMB, 0, "MB"),
+                        fmtRightTotalPct(vramTotalMB, 0,
+                                         (vramUsedMB / vramTotalMB) * 100.0),
+                        HUD_COLOR_GREEN);
             else
-                fmtRight(right, sizeof(right), "-", "-");
+                pushRow(out, n, fmtLeftNum("VRM:", vramUsedMB, 0, "MB"),
+                        fmtRight("-", "-"), HUD_COLOR_GREEN);
         }
         else
         {
-            fmtLeft(left, sizeof(left), "VRM:", "-", "MB");
-            fmtRight(right, sizeof(right), "-", "-");
+            pushRow(out, n, fmtLeft("VRM:", "-", "MB"),
+                    fmtRight("-", "-"), HUD_COLOR_GREEN);
         }
-
-        pushRow(out, n, left, right, HUD_COLOR_GREEN);
     }
 
     if (showChargerDeficit && chargerDeficit)
     {
-        fmtLeftNum(left, sizeof(left), "Chg:", chargerDeficitW, 1, "W");
-        fmtRightPhrase(right, sizeof(right), "charger short");
-        pushRow(out, n, left, right, HUD_COLOR_RED);
+        pushRow(out, n, fmtLeftNum("Chg:", chargerDeficitW, 1, "W"),
+                fmtRightPhrase("charger short"), HUD_COLOR_RED);
     }
 
-    for (int i = 0; i < HUD_M_COUNT; ++i)
+    if (showNetwork)
     {
+        const hud_metric_bi &down = metrics[HUD_M_NETDOWN];
+        const hud_metric_bi &up = metrics[HUD_M_NETUP];
+        if (down.show && down.series.size() > 0)
+            pushRow(out, n, formatMetricLeft(down), formatMetricRight(down), down.color);
+        if (up.show && up.series.size() > 0)
+            pushRow(out, n, formatMetricLeft(up), formatMetricRight(up), up.color);
+    }
+
+    if (showDisk && diskAvailable)
+    {
+        if (diskTotalGB > 0.0)
+            pushRow(out, n, fmtLeftNum("Dsk:", diskUsedGB, 1, "GB"),
+                    fmtRightTotalPct(diskTotalGB, 1, (diskUsedGB / diskTotalGB) * 100.0),
+                    HUD_COLOR_ORANGE);
+        else
+            pushRow(out, n, fmtLeftNum("Dsk:", diskUsedGB, 1, "GB"),
+                    fmtRight("-", "-"), HUD_COLOR_ORANGE);
+    }
+
+    eachMetric([&](int i) {
         const hud_metric_bi &m = metrics[i];
         if (m.graph != HUD_G_BATTERY || !m.show)
-            continue;
+            return;
 
-        formatMetricLeft(m, left, sizeof(left));
-        formatMetricRight(m, right, sizeof(right));
-        pushRow(out, n, left, right, m.color);
-    }
+        pushRow(out, n, formatMetricLeft(m), formatMetricRight(m), m.color);
+    });
 
     if (graphHasContent(HUD_G_BATTERY))
     {

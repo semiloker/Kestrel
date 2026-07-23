@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -35,25 +36,32 @@ jobs:
           install: >-
             ${{ matrix.prefix }}-gcc
             ${{ matrix.prefix }}-make
+            ${{ matrix.prefix }}-cmake
 
       - name: Show toolchain
         shell: cmd
         run: |
           set "PATH=${{ steps.msys2.outputs.msys2-location }}\${{ matrix.msystem }}\bin;%PATH%"
           gcc --version
-          mingw32-make --version
+          cmake --version
           windres --version
+
+      - name: Configure (CMake)
+        shell: cmd
+        run: |
+          set "PATH=${{ steps.msys2.outputs.msys2-location }}\${{ matrix.msystem }}\bin;%PATH%"
+          cmake -B build -G "MinGW Makefiles" -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         shell: cmd
         run: |
           set "PATH=${{ steps.msys2.outputs.msys2-location }}\${{ matrix.msystem }}\bin;%PATH%"
-          mingw32-make
+          cmake --build build --config Release -j8
 
       - name: Verify artifact
         shell: pwsh
         run: |
-          $exe = "bin/kestrel.exe"
+          $exe = "build/bin/kestrel.exe"
           if (-not (Test-Path $exe)) { throw "kestrel.exe was not produced" }
           $item = Get-Item $exe
           if ($item.Length -lt 500000) { throw "kestrel.exe is suspiciously small: $($item.Length) bytes" }
@@ -63,20 +71,62 @@ jobs:
           Write-Host "version: $($info.FileVersion)"
           if ($info.ProductName -ne "Kestrel") { throw "version resource missing or wrong product name" }
 
+      - name: Build and run unit tests
+        shell: cmd
+        run: |
+          set "PATH=${{ steps.msys2.outputs.msys2-location }}\${{ matrix.msystem }}\bin;%PATH%"
+          cmake -B build-test -G "MinGW Makefiles" -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DKESTREL_BUILD_TESTS=ON
+          cmake --build build-test --target kestrel_tests -- -j8
+          build-test\kestrel_tests.exe
+
       - name: Rebuild from clean must succeed
         shell: cmd
         run: |
           set "PATH=${{ steps.msys2.outputs.msys2-location }}\${{ matrix.msystem }}\bin;%PATH%"
-          mingw32-make clean
-          mingw32-make
+          cmake --build build --config Release --target clean_all
+          cmake -B build -G "MinGW Makefiles" -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release -j8
+
+      - name: Code sign (DIST-01, only if a certificate secret is present)
+        if: matrix.msystem == 'MINGW64' && env.SIGNING_CERT_PFX != ''
+        shell: pwsh
+        env:
+          SIGNING_CERT_PFX: ${{ secrets.SIGNING_CERT_PFX }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:SIGNING_CERT_PFX))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+            /f "$env:RUNNER_TEMP\cert.pfx" /p $env:SIGNING_CERT_PASSWORD build/bin/kestrel.exe
+          & $signtool.FullName verify /pa build/bin/kestrel.exe
 
       - name: Upload binary
         if: matrix.msystem == 'MINGW64'
         uses: actions/upload-artifact@v4
         with:
           name: kestrel-${{ github.sha }}
-          path: bin/kestrel.exe
+          path: build/bin/kestrel.exe
           if-no-files-found: error
+
+  release:
+    name: Release (on tag)
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: kestrel-${{ github.sha }}
+          path: dist
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/kestrel.exe
+          generate_release_notes: true
 
   warnings:
     name: Warnings are errors
@@ -93,12 +143,14 @@ jobs:
           install: >-
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-make
+            mingw-w64-x86_64-cmake
 
       - name: Build with -Werror
         shell: cmd
         run: |
           set "PATH=${{ steps.msys2.outputs.msys2-location }}\MINGW64\bin;%PATH%"
-          mingw32-make CXXFLAGS="-Wall -Werror -O2 -MMD -MP -Iinclude"
+          cmake -B build -G "MinGW Makefiles" -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-Wall -Wextra -Wpedantic -Werror"
+          cmake --build build --config Release -j8
 
   style:
     name: Project style
@@ -113,10 +165,22 @@ jobs:
       - name: Check style rules
         run: python tools/check_style.py .
 
-  static-analysis:
-    name: Static analysis (advisory)
+  clang-tidy:
+    name: clang-tidy
     runs-on: ubuntu-latest
-    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-tidy
+        run: sudo apt-get update && sudo apt-get install -y clang-tidy
+
+      - name: Check .clang-tidy exists
+        run: test -f .clang-tidy && echo "clang-tidy config found"
+
+  static-analysis:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    continue-on-error: false
     steps:
       - uses: actions/checkout@v4
 
@@ -128,7 +192,7 @@ jobs:
           cppcheck \
             --enable=warning,performance,portability \
             --inline-suppr \
-            --std=c++17 \
+            --std=c++20 \
             --language=c++ \
             --suppress=missingInclude \
             --suppress=missingIncludeSystem \

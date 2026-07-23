@@ -9,6 +9,7 @@
 #include <shellapi.h>
 #include <cstdio>
 #include <vector>
+#include <format>
 
 namespace
 {
@@ -328,13 +329,10 @@ std::string update_bi::backupVersion() const
     if (!VerQueryValueA(&buffer[0], "\\", (LPVOID *)&info, &infoLen) || !info)
         return std::string();
 
-    char text[64];
-    snprintf(text, sizeof(text), "%u.%u.%u",
-             (unsigned)HIWORD(info->dwFileVersionMS),
-             (unsigned)LOWORD(info->dwFileVersionMS),
-             (unsigned)HIWORD(info->dwFileVersionLS));
-
-    return text;
+    return std::format("{}.{}.{}",
+                       (unsigned)HIWORD(info->dwFileVersionMS),
+                       (unsigned)LOWORD(info->dwFileVersionMS),
+                       (unsigned)HIWORD(info->dwFileVersionLS));
 }
 
 update_bi::state_bi update_bi::state() const

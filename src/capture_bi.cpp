@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <format>
 
 namespace
 {
@@ -37,22 +38,18 @@ namespace
     {
         SYSTEMTIME st;
         GetLocalTime(&st);
-
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%04u-%02u-%02u %02u:%02u:%02u",
-                 st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-        return buf;
+        return std::format("{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                           (unsigned)st.wYear, (unsigned)st.wMonth, (unsigned)st.wDay,
+                           (unsigned)st.wHour, (unsigned)st.wMinute, (unsigned)st.wSecond);
     }
 
     std::string timestampFile()
     {
         SYSTEMTIME st;
         GetLocalTime(&st);
-
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%04u%02u%02u-%02u%02u%02u",
-                 st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-        return buf;
+        return std::format("{:04}{:02}{:02}-{:02}{:02}{:02}",
+                           (unsigned)st.wYear, (unsigned)st.wMonth, (unsigned)st.wDay,
+                           (unsigned)st.wHour, (unsigned)st.wMinute, (unsigned)st.wSecond);
     }
 
     std::string csvEscape(const std::string &s)
@@ -286,6 +283,27 @@ bool capture_bi::writeFrameCsv(const std::string &path) const
 
         fprintf(f, "%u,%.4f,%.4f,%.2f\n",
                 (unsigned)index, t, ms, ms > 0.0 ? 1000.0 / ms : 0.0);
+    }
+
+    if (frames.count() > 0)
+    {
+        fprintf(f, "\n# Summary Statistics\n");
+        fprintf(f, "# metric,value\n");
+        fprintf(f, "avg_fps,%.2f\n", frames.averageFps());
+        fprintf(f, "avg_frame_ms,%.3f\n", frames.averageMs());
+        fprintf(f, "median_ms,%.3f\n", frames.medianMs());
+        fprintf(f, "min_ms,%.3f\n", frames.minMs());
+        fprintf(f, "max_ms,%.3f\n", frames.maxMs());
+        fprintf(f, "stutters,%u\n", frames.stutters());
+        fprintf(f, "total_frames,%u\n", (unsigned)frames.count());
+        fprintf(f, "p01_ms,%.3f\n", frames.percentileMs(0.01));
+        fprintf(f, "p1_ms,%.3f\n", frames.percentileMs(0.1));
+        fprintf(f, "p5_ms,%.3f\n", frames.percentileMs(0.05));
+        fprintf(f, "p50_ms,%.3f\n", frames.percentileMs(0.50));
+        fprintf(f, "p95_ms,%.3f\n", frames.percentileMs(0.95));
+        fprintf(f, "p99_ms,%.3f\n", frames.percentileMs(0.99));
+        fprintf(f, "low_1_pct_fps,%.2f\n", frames.lowFps(0.01));
+        fprintf(f, "low_0_1_pct_fps,%.2f\n", frames.lowFps(0.001));
     }
 
     fclose(f);

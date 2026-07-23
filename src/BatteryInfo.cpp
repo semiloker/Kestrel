@@ -1,6 +1,8 @@
 #include "BatteryInfo.h"
 #include "logger_bi.h"
 
+#include <format>
+
 bool batteryinfo_bi::Initialize()
 {
     hDevInfo = SetupDiGetClassDevs(&GUID_DEVINTERFACE_BATTERY, NULL, NULL,
@@ -9,9 +11,8 @@ bool batteryinfo_bi::Initialize()
     if (hDevInfo == INVALID_HANDLE_VALUE)
         return false;
 
-    SP_DEVICE_INTERFACE_DATA did =
-        {
-            sizeof(SP_DEVICE_INTERFACE_DATA)};
+    SP_DEVICE_INTERFACE_DATA did = {};
+    did.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
 
     if (!SetupDiEnumDeviceInterfaces(hDevInfo, NULL, &GUID_DEVINTERFACE_BATTERY, 0, &did))
         return false;
@@ -140,7 +141,7 @@ bool batteryinfo_bi::QueryBatteryCycleCount()
     IWbemClassObject *pClassObject = nullptr;
     ULONG uReturn = 0;
 
-    if (pEnumerator->Next(WBEM_INFINITE, 1, &pClassObject, &uReturn) == S_OK)
+    if (pEnumerator->Next((LONG)WBEM_INFINITE, 1, &pClassObject, &uReturn) == S_OK)
     {
         VARIANT vtProp;
         VariantInit(&vtProp);
@@ -200,21 +201,12 @@ bool batteryinfo_bi::QueryBatteryInfo()
     info_static.alert2Wh = bi.DefaultAlert2 / 1000.0;
     info_static.alertsValid = !relative && (bi.DefaultAlert1 > 0 || bi.DefaultAlert2 > 0);
 
-    char buf[64];
-
     if (info_static.capacityValid)
     {
-        snprintf(buf, sizeof(buf), "%.1f Wh", info_static.designedWh);
-        info_static.DesignedCapacity = buf;
-
-        snprintf(buf, sizeof(buf), "%.1f Wh", info_static.fullChargedWh);
-        info_static.FullChargedCapacity = buf;
-
-        snprintf(buf, sizeof(buf), "%.1f Wh", info_static.alert1Wh);
-        info_static.DefaultAlert1 = buf;
-
-        snprintf(buf, sizeof(buf), "%.1f Wh", info_static.alert2Wh);
-        info_static.DefaultAlert2 = buf;
+        info_static.DesignedCapacity = std::format("{:.1f} Wh", info_static.designedWh);
+        info_static.FullChargedCapacity = std::format("{:.1f} Wh", info_static.fullChargedWh);
+        info_static.DefaultAlert1 = std::format("{:.1f} Wh", info_static.alert1Wh);
+        info_static.DefaultAlert2 = std::format("{:.1f} Wh", info_static.alert2Wh);
     }
     else
     {
@@ -233,8 +225,7 @@ bool batteryinfo_bi::QueryBatteryInfo()
         info_static.wearPercent = wear;
         info_static.wearValid = true;
 
-        snprintf(buf, sizeof(buf), "%.0f%%", wear);
-        info_static.WearLevel = buf;
+        info_static.WearLevel = std::format("{:.0f}%", wear);
     }
     else
     {
@@ -254,8 +245,6 @@ bool batteryinfo_bi::QueryBatteryStatus()
                          &bws, sizeof(bws), &bs, sizeof(bs), &bytesReturned, NULL))
         return false;
 
-    char buf[64];
-
     info_1s.charging = (bs.PowerState & BATTERY_CHARGING) != 0;
     info_1s.discharging = (bs.PowerState & BATTERY_DISCHARGING) != 0;
     info_1s.onLine = (bs.PowerState & BATTERY_POWER_ON_LINE) != 0;
@@ -264,8 +253,7 @@ bool batteryinfo_bi::QueryBatteryStatus()
     if (info_1s.voltageValid)
     {
         info_1s.voltageV = bs.Voltage / 1000.0;
-        snprintf(buf, sizeof(buf), "%.2f V", info_1s.voltageV);
-        info_1s.Voltage = buf;
+        info_1s.Voltage = std::format("{:.2f} V", info_1s.voltageV);
     }
     else
     {
@@ -276,8 +264,7 @@ bool batteryinfo_bi::QueryBatteryStatus()
     if (info_1s.rateValid)
     {
         info_1s.rateW = (double)(LONG)bs.Rate / 1000.0;
-        snprintf(buf, sizeof(buf), "%.2f W", info_1s.rateW);
-        info_1s.Rate = buf;
+        info_1s.Rate = std::format("{:.2f} W", info_1s.rateW);
     }
     else
     {
@@ -292,8 +279,7 @@ bool batteryinfo_bi::QueryBatteryStatus()
     if (info_1s.remainingValid)
     {
         info_1s.remainingWh = bs.Capacity / 1000.0;
-        snprintf(buf, sizeof(buf), "%.2f Wh", info_1s.remainingWh);
-        info_1s.RemainingCapacity = buf;
+        info_1s.RemainingCapacity = std::format("{:.2f} Wh", info_1s.remainingWh);
     }
     else
     {
@@ -307,8 +293,7 @@ bool batteryinfo_bi::QueryBatteryStatus()
         if (info_1s.chargePercent > 100.0)
             info_1s.chargePercent = 100.0;
 
-        snprintf(buf, sizeof(buf), "%.0f%%", info_1s.chargePercent);
-        info_1s.ChargeLevel = buf;
+        info_1s.ChargeLevel = std::format("{:.0f}%", info_1s.chargePercent);
     }
     else
     {
@@ -326,7 +311,6 @@ bool batteryinfo_bi::QueryBatteryRemaining()
     if (bi.FullChargedCapacity == 0)
         return true;
 
-    char buf[64];
     LONG rate = (LONG)bs.Rate;
     int rate_mW = (rate < 0) ? -rate : rate;
     bool rateUsable = info_1s.rateValid && rate_mW > 0;
@@ -334,9 +318,9 @@ bool batteryinfo_bi::QueryBatteryRemaining()
     if (info_1s.discharging && rateUsable)
     {
         info_10s.minutesToEmpty = (int)(((ULONGLONG)bs.Capacity * 60) / rate_mW);
-        snprintf(buf, sizeof(buf), "%dh. %dm.",
-                 info_10s.minutesToEmpty / 60, info_10s.minutesToEmpty % 60);
-        info_10s.TimeRemaining = buf;
+        info_10s.TimeRemaining = std::format("{}h. {}m.",
+                                             info_10s.minutesToEmpty / 60,
+                                             info_10s.minutesToEmpty % 60);
     }
     else if (info_1s.discharging)
     {
@@ -354,9 +338,9 @@ bool batteryinfo_bi::QueryBatteryRemaining()
                             : 0;
 
         info_10s.minutesToFull = (int)(((ULONGLONG)missing * 60) / rate_mW);
-        snprintf(buf, sizeof(buf), "%dh. %dm.",
-                 info_10s.minutesToFull / 60, info_10s.minutesToFull % 60);
-        info_10s.TimeToFullCharge = buf;
+        info_10s.TimeToFullCharge = std::format("{}h. {}m.",
+                                                info_10s.minutesToFull / 60,
+                                                info_10s.minutesToFull % 60);
     }
     else if (info_1s.charging)
     {

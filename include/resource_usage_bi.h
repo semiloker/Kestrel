@@ -17,10 +17,11 @@
 #include <dxgi1_2.h>
 
 #include "autostart_bi.h"
+#include "interfaces_bi.h"
 
 #define DIV 1048576
 
-class resource_usage_bi
+class resource_usage_bi : public IResourceUsage
 {
 public:
     resource_usage_bi()
@@ -47,121 +48,28 @@ public:
         }
     }
 
-    bool isStartWithWindowsEnabled();
-    bool enableStartWithWindows();
-    bool disableStartWithWindows();
-    bool toggleStartWithWindows();
+    bool isStartWithWindowsEnabled() override;
+    bool enableStartWithWindows() override;
+    bool disableStartWithWindows() override;
+    bool toggleStartWithWindows() override;
 
-    bool isStartAsAdminEnabled();
-    bool toggleStartAsAdmin();
+    bool isStartAsAdminEnabled() override;
+    bool toggleStartAsAdmin() override;
 
-    struct CpuInfo
-    {
-        std::string UsagePercent;
-        std::vector<std::string> CoreUsagePercents;
-
-        std::string cpuName;
-        std::string architecture;
-
-        double UsageValue = 0.0;
-
-        std::string packagePower;
-        double packagePowerW = 0.0;
-        bool packagePowerAvailable = false;
-
-        bool show_cpuName = false;
-        bool show_architecture = false;
-        bool show_UsagePercent = true;
-        bool show_CoreUsagePercents = false;
-        bool show_packagePower = true;
-    };
-
-    struct RamInfo
-    {
-        std::string dwMemoryLoad;
-        std::string ullTotalPhys;
-        std::string ullAvailPhys;
-        std::string ullTotalPageFile;
-        std::string ullAvailPageFile;
-        std::string ullTotalVirtual;
-        std::string ullAvailVirtual;
-        std::string ullAvailExtendedVirtual;
-
-        double loadValue = 0.0;
-        double commitValue = 0.0;
-        double usedGB = 0.0;
-        double totalGB = 0.0;
-
-        bool show_dwMemoryLoad = true;
-        bool show_ullTotalPhys = true;
-        bool show_ullAvailPhys = false;
-        bool show_ullTotalPageFile = false;
-        bool show_ullAvailPageFile = false;
-        bool show_ullTotalVirtual = false;
-        bool show_ullAvailVirtual = false;
-        bool show_ullAvailExtendedVirtual = false;
-
-    };
-
-    struct DiskInfo
-    {
-        std::string diskLetter;
-        std::string totalSpace;
-        std::string freeSpace;
-        std::string usedSpace;
-        std::string usagePercent;
-
-        bool show_diskLetter = false;
-        bool show_totalSpace = false;
-        bool show_freeSpace = false;
-        bool show_usedSpace = false;
-        bool show_usagePercent = false;
-    };
-
-    struct NetworkInfo
-    {
-        std::string interfaceName;
-        std::string downloadSpeed;
-        std::string uploadSpeed;
-
-        bool show_interfaceName = false;
-        bool show_downloadSpeed = false;
-        bool show_uploadSpeed = false;
-    };
-
-    struct GpuInfo
-    {
-        std::string gpuName;
-        std::string gpuLoad;
-
-        double gpuLoadValue = 0.0;
-
-        double vramUsedMB = 0.0;
-        double vramTotalMB = 0.0;
-        bool vramAvailable = false;
-
-        std::string gpuPower;
-        double gpuPowerW = 0.0;
-        bool gpuPowerAvailable = false;
-
-        bool show_gpuName = true;
-        bool show_gpuLoad = true;
-        bool show_vram = false;
-        bool show_gpuPower = false;
-    };
+    using CpuInfo = IResourceUsage::CpuInfo;
+    using RamInfo = IResourceUsage::RamInfo;
+    using DiskInfo = IResourceUsage::DiskInfo;
+    using NetworkInfo = IResourceUsage::NetworkInfo;
+    using GpuInfo = IResourceUsage::GpuInfo;
+    using AdapterInfo = IResourceUsage::AdapterInfo;
+    using mem_unit_bi = IResourceUsage::mem_unit_bi;
 
     CpuInfo cpuInfo;
     RamInfo ramInfo;
     GpuInfo gpuInfo;
+    std::vector<AdapterInfo> adapters;
     std::vector<DiskInfo> disksInfo;
     std::vector<NetworkInfo> networkInfo;
-
-    enum mem_unit_bi
-    {
-        MEM_UNIT_AUTO = 0,
-        MEM_UNIT_MB,
-        MEM_UNIT_GB
-    };
 
     int memUnit = MEM_UNIT_AUTO;
 
@@ -170,19 +78,20 @@ public:
     bool minimize_To_Tray = false;
     bool exit_on_key_esc = false;
 
-    bool updateRam();
-    bool updateCpu();
+    bool updateRam() override;
+    bool updateCpu() override;
     void initCpuInfo();
-    bool updateGpu();
+    bool updateGpu() override;
     void initGpuInfo();
 
-    bool updateGpuTime(DWORD pid, double *busyMsOut);
-    bool updateGpuMemory();
-    bool updateCpuPower();
-    bool updateDisk();
-    bool updateNetwork();
+    bool updateGpuTime(DWORD pid, double *busyMsOut) override;
+    bool updateGpuMemory() override;
+    bool updateCpuPower() override;
+    bool updateTemps() override;
+    bool updateDisk() override;
+    bool updateNetwork() override;
 
-    bool updateAll()
+    bool updateAll() override
     {
         bool success = true;
         success &= updateRam();
@@ -190,12 +99,13 @@ public:
         success &= updateCpu();
         success &= updateGpu();
         updateCpuPower();
+        updateTemps();
         success &= updateDisk();
         success &= updateNetwork();
         return success;
     }
 
-    bool updateHudSample()
+    bool updateHudSample() override
     {
         if (!collectShared())
             return false;
@@ -203,20 +113,22 @@ public:
         bool success = true;
         success &= updateCpu();
         updateCpuPower();
+        updateTemps();
         updateGpuMemory();
         return success;
     }
 
-    void cleanup();
+    void cleanup() override;
 
-    void startSampler(int intervalMs);
-    void stopSampler();
-    void setSamplerInterval(int intervalMs);
-    void setSamplerTarget(DWORD pid);
-    int samplerInterval() const { return (int)samplerIntervalMs; }
+    void startSampler(int intervalMs) override;
+    void stopSampler() override;
+    void setSamplerInterval(int intervalMs) override;
+    void setSamplerTarget(DWORD pid) override;
+    int samplerInterval() const override { return (int)samplerIntervalMs; }
 
     void readSnapshot(CpuInfo *cpu, RamInfo *ram, GpuInfo *gpu,
-                      double *gpuBusyMs, bool *gpuBusyValid);
+                      double *gpuBusyMs, bool *gpuBusyValid,
+                      std::vector<AdapterInfo> *adaptersOut = nullptr) override;
 
 private:
     static DWORD WINAPI samplerEntry(LPVOID param);
@@ -231,6 +143,7 @@ private:
     GpuInfo pubGpu;
     double pubGpuBusyMs = 0.0;
     bool pubGpuBusyValid = false;
+    std::vector<AdapterInfo> pubAdapters;
 
     HANDLE samplerThread = NULL;
     HANDLE samplerStop = NULL;

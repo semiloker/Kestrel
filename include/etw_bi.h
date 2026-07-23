@@ -7,70 +7,41 @@
 #include <map>
 #include <string>
 
+#include "interfaces_bi.h"
+
 #define ETW_MAX_SOURCES 12
 #define ETW_FRAME_RING 8192
 
-class etw_bi
+class etw_bi : public IETWTrace
 {
 public:
-    enum api_bi
-    {
-        API_NONE = 0,
-        API_D3D9,
-        API_D3D11,
-        API_D3D12,
-        API_OPENGL,
-        API_VULKAN
-    };
-
-    enum provider_bi
-    {
-        PROV_DXGI = 0,
-        PROV_D3D9,
-        PROV_DXGKRNL,
-        PROV_COUNT
-    };
-
-    struct sample_bi
-    {
-        bool valid;
-        double fps;
-        double frameIntervalMs;
-        unsigned presents;
-        DWORD pid;
-        bool isForeground;
-        api_bi api;
-
-        sample_bi() : valid(false), fps(0.0), frameIntervalMs(0.0),
-                      presents(0), pid(0), isForeground(false), api(API_NONE) {}
-    };
-
-    struct frame_sample_bi
-    {
-        LONGLONG time100ns;
-        float intervalMs;
-    };
+    using api_bi = IETWTrace::api_bi;
+    using provider_bi = IETWTrace::provider_bi;
+    using sample_bi = IETWTrace::sample_bi;
+    using frame_sample_bi = IETWTrace::frame_sample_bi;
 
     etw_bi();
     ~etw_bi();
 
-    bool start();
-    void stop();
+    bool start() override;
+    void stop() override;
 
-    bool running() const { return sessionActive; }
-    bool elevated() const { return isElevated; }
-    const char *lastError() const { return failReason; }
+    bool running() const override { return sessionActive; }
+    bool elevated() const override { return isElevated; }
+    const char *lastError() const override { return failReason; }
+    bool hasFailed() const override { return failed; }
 
-    void setTarget(DWORD processId);
-    DWORD target() const { return targetPid; }
+    void setTarget(DWORD processId) override;
+    DWORD target() const override { return targetPid; }
 
-    sample_bi sample();
+    sample_bi sample() override;
 
-    size_t drainFrames(frame_sample_bi *out, size_t max);
-    unsigned long long framesDropped() const { return frameLost; }
+    size_t drainFrames(frame_sample_bi *out, size_t max) override;
+    unsigned long long framesDropped() const override { return frameLost; }
 
-    void setFallbackSource(provider_bi provider, unsigned eventId);
-    void setDeepCensus(bool enabled) { deepCensus = enabled; }
+    void setFallbackSource(provider_bi provider, unsigned eventId) override;
+    void setDeepCensus(bool enabled) override { deepCensus = enabled; }
+    void autoConfigForApi(api_bi api) override;
 
     static const char *apiName(api_bi a);
     static const char *providerName(provider_bi p);
@@ -130,11 +101,13 @@ private:
     HANDLE thread;
 
     volatile bool sessionActive;
+    volatile bool failed;
     bool isElevated;
     bool deepCensus;
     const char *failReason;
 
     DWORD targetPid;
+    api_bi configuredApi;
 
     source_def_bi sources[ETW_MAX_SOURCES];
     int sourceCount;

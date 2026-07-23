@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "hud_bi.h"
+#include "interfaces_bi.h"
 
 struct hud_layout_bi
 {
@@ -62,16 +63,10 @@ struct hud_theme_bi
     D2D1_COLOR_F grid = {0.34f, 0.34f, 0.34f, 1.00f};
 };
 
-class overlay_bi
+class overlay_bi : public IOverlay
 {
 public:
-    enum corner_bi
-    {
-        CORNER_TOP_LEFT = 0,
-        CORNER_TOP_RIGHT,
-        CORNER_BOTTOM_LEFT,
-        CORNER_BOTTOM_RIGHT
-    };
+    using corner_bi = IOverlay::corner_bi;
 
     overlay_bi();
     ~overlay_bi();
@@ -81,26 +76,29 @@ public:
     bool show_on_screen_display = false;
     bool autoHideOverlay = false;
     bool overlayAutoHidden = false;
+    bool clickable = false;
+    void updateClickThrough() override;
 
     corner_bi corner = CORNER_TOP_RIGHT;
     int margin = 20;
     int refreshMs = HUD_SAMPLE_INTERVAL_MS;
     int overlayAlpha = 255;
 
-    void setScale(int percent);
-    int getScale() const { return hudScale; }
+    void setScale(int percent) override;
+    int getScale() const override { return hudScale; }
 
     hud_bi hud;
     hud_layout_bi layout;
     hud_theme_bi theme;
+    float graphHeightMultiplier = 1.0f;
 
-    void CreateOverlayWindow(HINSTANCE hInstance, HWND parentHwnd = NULL);
-    void DestroyOverlayWindow();
+    void CreateOverlayWindow(HINSTANCE hInstance, HWND parentHwnd = NULL) override;
+    void DestroyOverlayWindow() override;
 
-    void Render();
+    void Render() override;
 
-    void UpdatePosition();
-    void ForceTopMost();
+    void UpdatePosition() override;
+    void ForceTopMost() override;
 
     const D2D1_COLOR_F &resolveColor(hud_color_bi c) const;
 

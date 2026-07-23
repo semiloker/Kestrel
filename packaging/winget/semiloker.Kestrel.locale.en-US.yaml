@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: semiloker.Kestrel
+PackageVersion: 1.4.0
+PackageLocale: en-US
+Publisher: semiloker
+PublisherUrl: https://github.com/semiloker
+PublisherSupportUrl: https://github.com/semiloker/Kestrel/issues
+PackageName: Kestrel
+PackageUrl: https://github.com/semiloker/Kestrel
+License: MIT
+LicenseUrl: https://github.com/semiloker/Kestrel/blob/main/LICENSE
+Copyright: Copyright (c) semiloker
+ShortDescription: Battery, system and frame-time overlay for Windows.
+Description: >-
+  Kestrel is a single portable executable that shows battery health, CPU/GPU
+  load, package power, and real per-application frame timing via ETW in an
+  always-on-top overlay. Zero-install, no drivers.
+Moniker: kestrel
+Tags:
+  - overlay
+  - fps
+  - frame-time
+  - battery
+  - monitoring
+  - gaming
+  - etw
+ReleaseNotesUrl: https://github.com/semiloker/Kestrel/releases/tag/v1.4.0
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

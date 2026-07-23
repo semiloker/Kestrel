@@ -4,6 +4,8 @@
 #include <d2d1.h>
 #include <string>
 #include <vector>
+#include <tuple>
+#include <unordered_map>
 
 #include "BatteryInfo.h"
 #include "capture_bi.h"
@@ -51,7 +53,12 @@ public:
         HIT_CAPTURE_RUN,
         HIT_USERPRESET_APPLY,
         HIT_USERPRESET_SAVE,
-        HIT_ACTION
+        HIT_ACTION,
+        HIT_SEARCH,
+        HIT_MOVEUP,
+        HIT_MOVEDOWN,
+        HIT_GRAPHHEIGHT,
+        HIT_RESETORDER
     };
 
     enum action_bi
@@ -67,7 +74,8 @@ public:
         ACT_INSTALL_UPDATE,
         ACT_ROLLBACK,
         ACT_TOGGLE_CAPTURE,
-        ACT_OPEN_CAPTURES
+        ACT_OPEN_CAPTURES,
+        ACT_SAVE_PROFILE
     };
 
     struct capture_view_bi
@@ -174,11 +182,39 @@ public:
     void endScrollDrag();
     bool isScrollDragging() const { return scrollDragging; }
 
+    bool beginGraphHeightDrag(POINT cursorPos, overlay_bi *ov);
+    void updateGraphHeightDrag(POINT cursorPos, overlay_bi *ov);
+    void endGraphHeightDrag() { graphHeightDragging = false; }
+    bool isGraphHeightDragging() const { return graphHeightDragging; }
+
     const D2D1_COLOR_F &getAccentColor() const { return accentColor; }
     void setAccentColor(const D2D1_COLOR_F &c) { accentColor = c; }
 
     bool getNightMode() const { return nightMode; }
     void setNightMode(bool on) { nightMode = on; }
+
+    enum theme_bi {
+        THEME_DARK = 0,
+        THEME_LIGHT,
+        THEME_NORD,
+        THEME_DRACULA,
+        THEME_GRUVBOX,
+        THEME_DEUTERANOPIA_DARK,
+        THEME_DEUTERANOPIA_LIGHT,
+        THEME_PROTANOPIA_DARK,
+        THEME_PROTANOPIA_LIGHT,
+        THEME_TRITANOPIA_DARK,
+        THEME_TRITANOPIA_LIGHT,
+        THEME_COUNT
+    };
+
+    int getTheme() const { return themeIndex; }
+    // resetAccent=false re-applies the theme's palette without overwriting the
+    // user's chosen accent (used by brush rebuilds); true resets to the theme's
+    // default accent (used when the user actively picks a theme).
+    void setTheme(int index, bool resetAccent = true);
+    static const char *themeName(int index);
+    bool themeIsNight(int index) const;
 
     int getSettingsGroup() const { return settingsGroup; }
     void setSettingsGroup(int g);
@@ -201,7 +237,12 @@ public:
 
     float tabScroll[TAB_COUNT] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 
-private:
+    std::string searchQuery;
+    bool searchFocused = false;
+
+    void clearLayoutCache();
+    void setDWriteFactory(IDWriteFactory *factory) { dwriteFactory = factory; }
+
     struct palette_bi
     {
         D2D1_COLOR_F bg;
@@ -220,6 +261,7 @@ private:
         D2D1_COLOR_F bad;
     };
 
+private:
     struct row_bi
     {
         const wchar_t *label;
@@ -228,6 +270,7 @@ private:
         int color;
         bool available;
         const wchar_t *desc;
+        int metricId = -1;
     };
 
     void fillR(float l, float t, float r, float b, const D2D1_COLOR_F &c);
@@ -292,6 +335,7 @@ private:
     std::vector<D2D1_COLOR_F> colorPalette;
     palette_bi pal;
     bool nightMode;
+    int themeIndex = THEME_DARK;
 
     int settingsGroup = GROUP_OVERLAY;
 
@@ -316,10 +360,26 @@ private:
     bool footerActive = false;
     bool scrollActive = false;
     bool scrollDragging = false;
+    bool graphHeightDragging = false;
+    D2D1_RECT_F graphSliderTrack = {0.0f, 0.0f, 0.0f, 0.0f};
     float dragStartY = 0.0f;
     float dragStartOffset = 0.0f;
 
     std::vector<hit_bi> hits;
+
+    IDWriteFactory *dwriteFactory = nullptr;
+    typedef std::tuple<const std::wstring, IDWriteTextFormat*, float, float, DWRITE_TEXT_ALIGNMENT> LayoutKey;
+    struct LayoutHash {
+        size_t operator()(const LayoutKey &k) const {
+            size_t h = std::hash<std::wstring>()(std::get<0>(k));
+            h ^= (size_t)std::get<1>(k) * 0x9e3779b9;
+            h ^= (size_t)(std::get<2>(k) * 100.0f) * 0x9e3779b9;
+            h ^= (size_t)(std::get<3>(k) * 100.0f) * 0x9e3779b9;
+            h ^= std::get<4>(k) * 0x9e3779b9;
+            return h;
+        }
+    };
+    std::unordered_map<LayoutKey, IDWriteTextLayout*, LayoutHash> layoutCache;
 };
 
 #endif

@@ -20,6 +20,8 @@
 #include <comdef.h>
 #include <Wbemidl.h>
 
+#include "interfaces_bi.h"
+
 #ifndef BatteryCycleCount
     #define BatteryCycleCount ((BATTERY_QUERY_INFORMATION_LEVEL)6)
 #endif
@@ -44,7 +46,7 @@ typedef struct _BATTERY_WMI_CYCLE_COUNT
     ULONG CycleCount;
 } BATTERY_WMI_CYCLE_COUNT, *PBATTERY_WMI_CYCLE_COUNT;
 
-class batteryinfo_bi
+class batteryinfo_bi : public IBatteryInfo
 {
 private:
     HDEVINFO hDevInfo;
@@ -54,68 +56,9 @@ private:
     ULONG tag;
 
 public:
-    struct bi_struct_static
-    {
-        std::string Chemistry;
-        std::string DesignedCapacity;
-        std::string FullChargedCapacity;
-        std::string DefaultAlert1;
-        std::string DefaultAlert2;
-        std::string WearLevel;
-        std::string CycleCount;
-
-        double designedWh = 0.0;
-        double fullChargedWh = 0.0;
-        double alert1Wh = 0.0;
-        double alert2Wh = 0.0;
-        double wearPercent = 0.0;
-        int cycleCount = 0;
-
-        bool capacityValid = false;
-        bool wearValid = false;
-        bool cycleCountValid = false;
-        bool alertsValid = false;
-    };
-
-    struct bi_struct_dynamic_1s
-    {
-        std::string Voltage;
-        std::string Rate;
-        std::string PowerState;
-        std::string RemainingCapacity;
-        std::string ChargeLevel;
-
-        double voltageV = 0.0;
-        double rateW = 0.0;
-        double remainingWh = 0.0;
-        double chargePercent = 0.0;
-
-        bool voltageValid = false;
-        bool rateValid = false;
-        bool remainingValid = false;
-        bool chargeValid = false;
-
-        bool charging = false;
-        bool discharging = false;
-        bool onLine = false;
-
-        bool Voltage_ = false;
-        bool Rate_ = false;
-        bool PowerState_ = false;
-        bool RemainingCapacity_ = false;
-        bool ChargeLevel_ = false;
-    };
-
-    struct bi_struct_dynamic_10s
-    {
-        std::string TimeRemaining;
-        std::string TimeToFullCharge;
-
-        int minutesToEmpty = -1;
-        int minutesToFull = -1;
-
-        bool TimeRemaining_ = false;
-    };
+    using bi_struct_static = IBatteryInfo::bi_struct_static;
+    using bi_struct_dynamic_1s = IBatteryInfo::bi_struct_dynamic_1s;
+    using bi_struct_dynamic_10s = IBatteryInfo::bi_struct_dynamic_10s;
 
     bi_struct_static info_static;
     bi_struct_dynamic_1s info_1s;
@@ -135,12 +78,12 @@ public:
             SetupDiDestroyDeviceInfoList(hDevInfo);
     }
 
-    bool Initialize();
-    bool QueryTag();
-    bool QueryBatteryInfo();
-    bool QueryBatteryStatus();
-    bool QueryBatteryRemaining();
-    bool QueryBatteryCycleCount();
+    bool Initialize() override;
+    bool QueryTag() override;
+    bool QueryBatteryInfo() override;
+    bool QueryBatteryStatus() override;
+    bool QueryBatteryRemaining() override;
+    bool QueryBatteryCycleCount() override;
 
     void PrintAllConsole() const;
 };
