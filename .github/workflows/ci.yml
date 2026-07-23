@@ -103,7 +103,7 @@ jobs:
 
       - name: Upload binary
         if: matrix.msystem == 'MINGW64'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kestrel-${{ github.sha }}
           path: build/bin/kestrel.exe
