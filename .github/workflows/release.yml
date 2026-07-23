@@ -81,7 +81,7 @@ jobs:
           Compress-Archive -Path dist/* -DestinationPath "kestrel-${{ steps.version.outputs.tag }}-win64.zip"
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Kestrel ${{ steps.version.outputs.tag }}
