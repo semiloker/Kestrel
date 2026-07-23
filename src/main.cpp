@@ -1316,16 +1316,6 @@ void win_bi::OnDestroy()
     PostQuitMessage(0);
 }
 
-static void focusExistingInstance()
-{
-    HWND existing = FindWindowA(APP_WINDOW_CLASS, NULL);
-    if (!existing)
-        return;
-
-    ShowWindow(existing, SW_RESTORE);
-    SetForegroundWindow(existing);
-}
-
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
     log_bi::init();
@@ -1355,11 +1345,23 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     HANDLE instanceMutex = CreateMutexA(NULL, TRUE, APP_MUTEX_NAME);
     if (instanceMutex && GetLastError() == ERROR_ALREADY_EXISTS)
     {
-        log_bi::write("another instance is already running, focusing it");
-        focusExistingInstance();
-        CloseHandle(instanceMutex);
-        log_bi::shutdown();
-        return 0;
+        HWND existing = FindWindowA(APP_WINDOW_CLASS, NULL);
+        if (existing)
+        {
+            log_bi::write("another instance is already running, focusing it");
+            ShowWindow(existing, SW_RESTORE);
+            SetForegroundWindow(existing);
+            CloseHandle(instanceMutex);
+            log_bi::shutdown();
+            return 0;
+        }
+        log_bi::write("orphaned mutex from crashed instance, taking over");
+        DWORD waitResult = WaitForSingleObject(instanceMutex, 0);
+        if (waitResult != WAIT_ABANDONED && waitResult != WAIT_OBJECT_0)
+        {
+            CloseHandle(instanceMutex);
+            instanceMutex = CreateMutexA(NULL, TRUE, APP_MUTEX_NAME);
+        }
     }
 
     int result = 0;
