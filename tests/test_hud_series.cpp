@@ -114,6 +114,12 @@ TEST_CASE("hud_series_bi push and access", "[hud_series]")
         REQUIRE(s.size() == 3);
         REQUIRE(s.minimum() == 1.0);
         REQUIRE(s.maximum() == 100.0);
+        s.push(60.0);
+        REQUIRE(s.minimum() == 50.0);
+        REQUIRE(s.maximum() == 100.0);
+        s.push(70.0);
+        REQUIRE(s.minimum() == 50.0);
+        REQUIRE(s.maximum() == 70.0);
     }
 }
 
