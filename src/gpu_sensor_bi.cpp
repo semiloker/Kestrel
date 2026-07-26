@@ -331,9 +331,9 @@ bool gpu_sensor_bi::ensureNvml()
     if (!nvml_)
         return false;
 
-    pfn_nvml_init_bi init = (pfn_nvml_init_bi)GetProcAddress(nvml_, "nvmlInit_v2");
+    void *init = (void *)GetProcAddress(nvml_, "nvmlInit_v2");
     if (!init)
-        init = (pfn_nvml_init_bi)GetProcAddress(nvml_, "nvmlInit");
+        init = (void *)GetProcAddress(nvml_, "nvmlInit");
 
     nvmlShutdown_ = (void *)GetProcAddress(nvml_, "nvmlShutdown");
     nvmlGetCount_ = (void *)GetProcAddress(nvml_, "nvmlDeviceGetCount_v2");
@@ -352,7 +352,7 @@ bool gpu_sensor_bi::ensureNvml()
         return false;
     }
 
-    if (init() != 0)
+    if (((pfn_nvml_init_bi)init)() != 0)
     {
         FreeLibrary(nvml_);
         nvml_ = NULL;

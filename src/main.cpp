@@ -859,7 +859,7 @@ void win_bi::OnCreate(HWND hwnd)
     UpdateOverlayHud();
 }
 
-void win_bi::OnCommand(WPARAM wParam)
+void win_bi::OnCommand([[maybe_unused]] WPARAM wParam)
 {
 }
 
@@ -1309,7 +1309,7 @@ void win_bi::OnKeyDown(WPARAM wParam)
         SendMessage(hwnd, WM_CLOSE, 0, 0);
 }
 
-void win_bi::OnKeyUp(WPARAM wParam)
+void win_bi::OnKeyUp([[maybe_unused]] WPARAM wParam)
 {
 }
 
@@ -1329,7 +1329,7 @@ POINT win_bi::ClientToDip(LPARAM lParam) const
     return p;
 }
 
-void win_bi::OnMouseMove(WPARAM wParam, LPARAM lParam)
+void win_bi::OnMouseMove([[maybe_unused]] WPARAM wParam, LPARAM lParam)
 {
     if (!draw_bibi_bi)
         return;
@@ -1393,7 +1393,7 @@ void win_bi::OnUpdateNotify()
         InvalidateRect(hwnd, NULL, FALSE);
 }
 
-void win_bi::OnMouseWheel(WPARAM wParam, LPARAM lParam)
+void win_bi::OnMouseWheel(WPARAM wParam, [[maybe_unused]] LPARAM lParam)
 {
     short delta = GET_WHEEL_DELTA_WPARAM(wParam);
 
@@ -1402,7 +1402,7 @@ void win_bi::OnMouseWheel(WPARAM wParam, LPARAM lParam)
     InvalidateRect(hwnd, NULL, TRUE);
 }
 
-void win_bi::OnLeftButtonUp(WPARAM wParam, LPARAM lParam)
+void win_bi::OnLeftButtonUp([[maybe_unused]] WPARAM wParam, [[maybe_unused]] LPARAM lParam)
 {
     if (draw_bibi_bi->isScrollDragging())
     {
@@ -1420,7 +1420,7 @@ void win_bi::OnLeftButtonUp(WPARAM wParam, LPARAM lParam)
     }
 }
 
-void win_bi::OnLeftButtonDown(WPARAM wParam, LPARAM lParam)
+void win_bi::OnLeftButtonDown([[maybe_unused]] WPARAM wParam, LPARAM lParam)
 {
     POINT click = ClientToDip(lParam);
 
@@ -1650,7 +1650,7 @@ draw_batteryinfo_bi::diag_bi win_bi::BuildDiagnostics()
     return diag;
 }
 
-void win_bi::OnRightButtonDown(WPARAM wParam, LPARAM lParam)
+void win_bi::OnRightButtonDown([[maybe_unused]] WPARAM wParam, [[maybe_unused]] LPARAM lParam)
 {
 }
 
@@ -1756,11 +1756,11 @@ void win_bi::OnTimer(WPARAM wParam)
     }
 }
 
-void win_bi::OnSetFocus(HWND hwnd)
+void win_bi::OnSetFocus([[maybe_unused]] HWND hwnd)
 {
 }
 
-void win_bi::OnKillFocus(HWND hwnd)
+void win_bi::OnKillFocus([[maybe_unused]] HWND hwnd)
 {
 }
 
@@ -1958,7 +1958,7 @@ void win_bi::OnDestroy()
     PostQuitMessage(0);
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+int WINAPI WinMain(HINSTANCE hInstance, [[maybe_unused]] HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
 #ifdef _DEBUG
     _CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);

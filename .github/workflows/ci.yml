@@ -352,7 +352,7 @@ jobs:
       - uses: codespell-project/actions-codespell@v2
         with:
           skip: ./.git,./assets,*.ico,*.png
-          ignore_words_list: currenty
+          ignore_words_list: currenty,textin
 
   logo:
     name: Logo is reproducible

@@ -6,7 +6,7 @@
 *.md    text
 *.yml   text
 *.py    text
-*.svg   text
+*.svg   text eol=lf
 *.ini   text
 makefile text
 
