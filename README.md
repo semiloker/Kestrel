@@ -176,21 +176,35 @@ toggle is greyed out rather than displaying a number Kestrel cannot stand behind
 
 - `Ctrl+Alt+B` starts and stops a capture, with a `REC` row in the overlay so
   you always know it is running. The overlay does not have to be visible
+- The measured process, overlay monitor and per-game profile stay pinned for
+  the entire run, even if you alt-tab while recording
 - Summary per run: average, 1% low, 0.1% low, median and worst frame, stutter
   count, average package power, **energy spent in watt-hours**, and the battery
   life that load implies
 - One CSV row per frame in `%APPDATA%\Kestrel\captures\`, plus an `index.csv`
   of every run, both readable by Excel or a script
+- Capture finalization runs in the background. A run stops automatically at
+  240,000 frames or six hours, and power samples are downsampled to one per
+  second so an unattended capture cannot grow memory indefinitely
 
 ### Updating
 
 - Checks GitHub for a newer release only when you ask it to, never on its own
+- Downloads the exact `kestrel.exe` and matching SHA-256 checksum asset over an
+  allowlisted HTTPS redirect chain. Authenticode is also verified when the
+  release is signed
 - Installs in place and keeps the previous build as `kestrel.old.exe`, with a
-  roll-back button if the new one misbehaves
+  roll-back button if the new one misbehaves. Both update and rollback verify
+  the executable again immediately before the replacement process starts
+- An elevated process updates only from an administrator-protected directory,
+  preventing a writable parent directory from swapping the verified launch path
 
 ### Application
 
 - Settings persisted to `%APPDATA%\Kestrel\settings.ini`
+- Per-game profiles that remember the selected metrics and appearance for each
+  executable
+- JSON settings export and import for backups or deployment
 - Diagnostic log at `%APPDATA%\Kestrel\kestrel.log`
 - Start with Windows, optionally elevated through a scheduled task so that no UAC
   prompt appears on every login
@@ -214,8 +228,9 @@ toggle is greyed out rather than displaying a number Kestrel cannot stand behind
 ## Installation
 
 Download `kestrel.exe` from the [latest release](https://github.com/semiloker/Kestrel/releases/latest)
-and run it. There is no installer, and nothing is written outside
-`%APPDATA%\Kestrel`.
+and run it. There is no installer. Runtime settings, logs and captures stay in
+`%APPDATA%\Kestrel`; enabling autostart additionally creates the documented
+Task Scheduler entry or `Run` registry value.
 
 ---
 
@@ -240,7 +255,21 @@ Kestrel manually, because it relaunches itself through that task.
 
 Everything is toggled from the Settings and Appearance tabs. The resulting
 `%APPDATA%\Kestrel\settings.ini` is plain `key=value` text and can be edited by
-hand while Kestrel is closed. Deleting the file resets everything.
+hand while Kestrel is closed. Profile section names are encoded so arbitrary
+executable names cannot alter the INI structure. Deleting the file resets
+everything.
+
+Use **Save profile for foreground app** to store the current presentation for
+one executable. Kestrel applies that profile when the executable becomes the
+measurement target.
+
+Settings can also be backed up in a bounded JSON format. Close the running
+instance before importing:
+
+```powershell
+kestrel.exe --export-settings kestrel-settings.json
+kestrel.exe --import-settings kestrel-settings.json
+```
 
 Three keys have no user interface, because they exist for diagnosing games whose
 present events Kestrel does not recognise yet:
@@ -334,6 +363,14 @@ mingw32-make clean
 Header dependencies are tracked, so editing a header rebuilds everything that
 includes it. A plain `mingw32-make` after any change is always correct.
 
+To build and run the regression tests with CMake:
+
+```bash
+cmake -S . -B build -G "MinGW Makefiles" -DKESTREL_BUILD_TESTS=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
 ### Regenerating the logo
 
 The icon is generated from code so that it stays reproducible:
@@ -374,9 +411,6 @@ Key modules:
 
 Ordered roughly by priority. Suggestions are welcome, open an issue.
 
-- **Benchmark capture.** Record a run to CSV with frame times, percentiles and a
-  summary, for comparing settings or hardware.
-- **Per-game profiles.** Remember which metrics to show for each executable.
 - **Exclusive fullscreen support.** Requires an injected overlay, the approach
   RivaTuner Statistics Server takes.
 - **Wider frame-source coverage.** Recognise more present events so that OpenGL
@@ -384,8 +418,10 @@ Ordered roughly by priority. Suggestions are welcome, open an issue.
 - **Multi-GPU awareness.** Report each adapter separately instead of summing.
 - **Fan speed.** The WDDM adapter block already carries GPU fan RPM next to the
   temperature Kestrel reads; surface it.
-- **Packaging.** A winget manifest and a signed release binary.
-- **Localisation.** The interface is English only today.
+- **Signed distribution.** Publish an Authenticode-signed binary whenever the
+  project signing secrets are available.
+- **More translations.** The language-file mechanism is ready; additional
+  reviewed translations are welcome.
 
 ---
 
