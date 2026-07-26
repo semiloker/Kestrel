@@ -40,7 +40,7 @@ jobs:
     name: Version consistency
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
 
@@ -115,7 +115,7 @@ jobs:
             prefix: mingw-w64-ucrt-x86_64
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
 
@@ -266,7 +266,7 @@ jobs:
     name: Warnings are errors
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
 
@@ -292,7 +292,7 @@ jobs:
     name: Project style
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
 
@@ -307,7 +307,7 @@ jobs:
     name: Workflow static analysis
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
 
@@ -320,7 +320,7 @@ jobs:
     name: C++ static analysis
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
 
@@ -345,7 +345,7 @@ jobs:
     name: Spelling
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
 
@@ -358,7 +358,7 @@ jobs:
     name: Logo is reproducible
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
 
@@ -410,7 +410,7 @@ jobs:
     name: Documentation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
 
