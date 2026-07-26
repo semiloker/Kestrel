@@ -3,17 +3,107 @@ name: CI
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: Commit or ref to test
+        required: false
+        type: string
+        default: ""
+      artifact_name:
+        description: Name for the canonical Windows artifact
+        required: false
+        type: string
+        default: ""
+      release_build:
+        description: Whether this run gates a release
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      SIGNING_CERT_PFX:
+        required: false
+      SIGNING_CERT_PASSWORD:
+        required: false
+
+permissions:
+  contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ inputs.checkout_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  version-consistency:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Compare every version source
+        run: |
+          python - <<'EOF'
+          import pathlib
+          import re
+          import xml.etree.ElementTree as ET
+
+          cmake_text = pathlib.Path("CMakeLists.txt").read_text(encoding="utf-8")
+          header_text = pathlib.Path("include/app_identity_bi.h").read_text(encoding="utf-8")
+
+          cmake_match = re.search(
+              r"\bproject\s*\(\s*Kestrel\s+VERSION\s+(\d+\.\d+\.\d+\.\d+)",
+              cmake_text,
+              re.IGNORECASE | re.DOTALL,
+          )
+          string_match = re.search(
+              r'^\s*#define\s+APP_VERSION_STRING\s+"([^"]+)"',
+              header_text,
+              re.MULTILINE,
+          )
+          if cmake_match is None or string_match is None:
+              raise SystemExit("could not read the CMake or application version")
+
+          component_names = ("MAJOR", "MINOR", "PATCH", "BUILD")
+          components = []
+          for name in component_names:
+              match = re.search(
+                  rf"^\s*#define\s+APP_VERSION_{name}\s+(\d+)\s*$",
+                  header_text,
+                  re.MULTILINE,
+              )
+              if match is None:
+                  raise SystemExit(f"missing APP_VERSION_{name}")
+              components.append(match.group(1))
+
+          root = ET.parse("app.manifest").getroot()
+          identity = root.find("{urn:schemas-microsoft-com:asm.v1}assemblyIdentity")
+          if identity is None or "version" not in identity.attrib:
+              raise SystemExit("app.manifest is missing assemblyIdentity version")
+
+          versions = {
+              "CMakeLists.txt": cmake_match.group(1),
+              "APP_VERSION_STRING": string_match.group(1),
+              "APP_VERSION components": ".".join(components),
+              "app.manifest": identity.attrib["version"],
+          }
+          if len(set(versions.values())) != 1:
+              details = ", ".join(f"{source}={version}" for source, version in versions.items())
+              raise SystemExit(f"version sources disagree: {details}")
+
+          print("version:", next(iter(versions.values())))
+          EOF
+
   build:
     name: Build (${{ matrix.msystem }})
+    needs: version-consistency
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -25,7 +115,9 @@ jobs:
             prefix: mingw-w64-ucrt-x86_64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Set up MSYS2
         id: msys2
@@ -46,7 +138,7 @@ jobs:
           cmake --version
           windres --version
 
-      - name: Configure (CMake)
+      - name: Configure
         shell: cmd
         run: |
           set "PATH=${{ steps.msys2.outputs.msys2-location }}\${{ matrix.msystem }}\bin;%PATH%"
@@ -58,18 +150,24 @@ jobs:
           set "PATH=${{ steps.msys2.outputs.msys2-location }}\${{ matrix.msystem }}\bin;%PATH%"
           cmake --build build --config Release -j8
 
-      - name: Verify artifact
+      - name: Verify initial artifact
         shell: pwsh
         run: |
           $exe = "build/bin/kestrel.exe"
-          if (-not (Test-Path $exe)) { throw "kestrel.exe was not produced" }
-          $item = Get-Item $exe
-          if ($item.Length -lt 500000) { throw "kestrel.exe is suspiciously small: $($item.Length) bytes" }
+          if (-not (Test-Path -LiteralPath $exe)) {
+            throw "kestrel.exe was not produced"
+          }
+          $item = Get-Item -LiteralPath $exe
+          if ($item.Length -lt 500000) {
+            throw "kestrel.exe is suspiciously small: $($item.Length) bytes"
+          }
           $info = $item.VersionInfo
           Write-Host "size:    $($item.Length)"
           Write-Host "product: $($info.ProductName)"
           Write-Host "version: $($info.FileVersion)"
-          if ($info.ProductName -ne "Kestrel") { throw "version resource missing or wrong product name" }
+          if ($info.ProductName -ne "Kestrel") {
+            throw "version resource is missing or has the wrong product name"
+          }
 
       - name: Build and run unit tests
         shell: cmd
@@ -79,7 +177,7 @@ jobs:
           cmake --build build-test --target kestrel_tests -- -j8
           build-test\kestrel_tests.exe
 
-      - name: Rebuild from clean must succeed
+      - name: Rebuild from clean
         shell: cmd
         run: |
           set "PATH=${{ steps.msys2.outputs.msys2-location }}\${{ matrix.msystem }}\bin;%PATH%"
@@ -87,52 +185,90 @@ jobs:
           cmake -B build -G "MinGW Makefiles" -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release -j8
 
-      - name: Code sign (DIST-01, only if a certificate secret is present)
-        if: matrix.msystem == 'MINGW64' && env.SIGNING_CERT_PFX != ''
+      - name: Sign and verify canonical binary when configured
+        if: matrix.msystem == 'MINGW64'
         shell: pwsh
         env:
           SIGNING_CERT_PFX: ${{ secrets.SIGNING_CERT_PFX }}
           SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+          RELEASE_BUILD: ${{ inputs.release_build }}
         run: |
-          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:SIGNING_CERT_PFX))
-          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
-            Sort-Object FullName -Descending | Select-Object -First 1
-          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
-            /f "$env:RUNNER_TEMP\cert.pfx" /p $env:SIGNING_CERT_PASSWORD build/bin/kestrel.exe
-          & $signtool.FullName verify /pa build/bin/kestrel.exe
+          $hasCertificate = -not [string]::IsNullOrWhiteSpace($env:SIGNING_CERT_PFX)
+          $hasPassword = -not [string]::IsNullOrWhiteSpace($env:SIGNING_CERT_PASSWORD)
+          if ($hasCertificate -xor $hasPassword) {
+            throw "SIGNING_CERT_PFX and SIGNING_CERT_PASSWORD must either both be set or both be empty"
+          }
+          if (-not $hasCertificate) {
+            Write-Host "No signing certificate is configured; the build will remain unsigned"
+            exit 0
+          }
 
-      - name: Upload binary
+          $certificatePath = Join-Path $env:RUNNER_TEMP "kestrel-signing-cert.pfx"
+          try {
+            [IO.File]::WriteAllBytes(
+              $certificatePath,
+              [Convert]::FromBase64String($env:SIGNING_CERT_PFX)
+            )
+
+            $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1
+            if ($null -eq $signTool) {
+              throw "signtool.exe was not found"
+            }
+
+            & $signTool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+              /f $certificatePath /p $env:SIGNING_CERT_PASSWORD build/bin/kestrel.exe
+            if ($LASTEXITCODE -ne 0) {
+              throw "signtool failed to sign kestrel.exe"
+            }
+
+            & $signTool.FullName verify /pa /all build/bin/kestrel.exe
+            if ($LASTEXITCODE -ne 0) {
+              throw "signtool could not verify kestrel.exe"
+            }
+
+            $signature = Get-AuthenticodeSignature -FilePath build/bin/kestrel.exe
+            if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+              throw "Authenticode verification failed: $($signature.StatusMessage)"
+            }
+            Write-Host "Verified Authenticode signature for release_build=$env:RELEASE_BUILD"
+          } finally {
+            if (Test-Path -LiteralPath $certificatePath) {
+              Remove-Item -LiteralPath $certificatePath -Force
+            }
+          }
+
+      - name: Verify canonical artifact
         if: matrix.msystem == 'MINGW64'
-        uses: actions/upload-artifact@v4
+        shell: pwsh
+        run: |
+          $exe = Get-Item -LiteralPath "build/bin/kestrel.exe"
+          if ($exe.Length -lt 500000) {
+            throw "canonical kestrel.exe is suspiciously small: $($exe.Length) bytes"
+          }
+          if ($exe.VersionInfo.ProductName -ne "Kestrel") {
+            throw "canonical kestrel.exe has the wrong product name"
+          }
+          Write-Host "canonical sha256: $((Get-FileHash -LiteralPath $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"
+
+      - name: Upload canonical Windows binary
+        if: matrix.msystem == 'MINGW64'
+        uses: actions/upload-artifact@v7
         with:
-          name: kestrel-${{ github.sha }}
+          name: ${{ inputs.artifact_name || format('kestrel-{0}', github.sha) }}
           path: build/bin/kestrel.exe
           if-no-files-found: error
-
-  release:
-    name: Release (on tag)
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: kestrel-${{ github.sha }}
-          path: dist
-
-      - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/kestrel.exe
-          generate_release_notes: true
+          retention-days: 7
+          compression-level: 0
 
   warnings:
     name: Warnings are errors
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Set up MSYS2
         id: msys2
@@ -156,33 +292,37 @@ jobs:
     name: Project style
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Check style rules
         run: python tools/check_style.py .
 
-  clang-tidy:
-    name: clang-tidy
+  workflow-lint:
+    name: Workflow static analysis
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
-      - name: Install clang-tidy
-        run: sudo apt-get update && sudo apt-get install -y clang-tidy
-
-      - name: Check .clang-tidy exists
-        run: test -f .clang-tidy && echo "clang-tidy config found"
+      - name: Run actionlint
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
 
   static-analysis:
-    name: Static analysis
+    name: C++ static analysis
     runs-on: ubuntu-latest
-    continue-on-error: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Install cppcheck
         run: sudo apt-get update && sudo apt-get install -y cppcheck
@@ -205,7 +345,9 @@ jobs:
     name: Spelling
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - uses: codespell-project/actions-codespell@v2
         with:
@@ -216,71 +358,92 @@ jobs:
     name: Logo is reproducible
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
-      - name: Install Pillow
-        run: pip install pillow
+      - name: Install the pinned logo renderer
+        run: python -m pip install --disable-pip-version-check pillow==11.2.1
 
       - name: Regenerate logo
         run: python tools/make_logo.py build-assets
+
+      - name: Compare every generated asset byte-for-byte
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            kestrel.ico
+            logo.png
+            logo-white.png
+            logo-black.png
+            logo.svg
+            logo-white.svg
+          )
+          for file in "${files[@]}"; do
+            if ! cmp --silent "assets/$file" "build-assets/$file"; then
+              echo "generated asset differs from assets/$file"
+              sha256sum "assets/$file" "build-assets/$file"
+              exit 1
+            fi
+          done
 
       - name: Verify icon contains every required size
         run: |
           python - <<'EOF'
           from PIL import Image
+
           expected = {16, 24, 32, 48, 64, 128, 256}
-          with Image.open("build-assets/kestrel.ico") as img:
-              sizes = {s[0] for s in img.info["sizes"]}
+          with Image.open("build-assets/kestrel.ico") as image:
+              sizes = {size[0] for size in image.info["sizes"]}
           missing = expected - sizes
           if missing:
               raise SystemExit("icon is missing sizes: %s" % sorted(missing))
           print("icon sizes:", sorted(sizes))
           EOF
 
-      - name: Committed assets must exist
-        run: |
-          for f in assets/kestrel.ico assets/logo.png assets/logo.svg; do
-            test -f "$f" || { echo "missing $f"; exit 1; }
-          done
-
   docs:
     name: Documentation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Local links in README must resolve
         run: |
           python - <<'EOF'
-          import re, os, sys
+          import os
+          import re
+
           text = open("README.md", encoding="utf-8").read()
-          targets = re.findall(r'\]\(([^)#]+)\)', text) + re.findall(r'src="([^"]+)"', text)
+          targets = re.findall(r"\]\(([^)#]+)\)", text) + re.findall(r'src="([^"]+)"', text)
           missing = []
-          for t in targets:
-              if t.startswith(("http://", "https://", "mailto:")):
+          for target in targets:
+              if target.startswith(("http://", "https://", "mailto:")):
                   continue
-              if not os.path.exists(t):
-                  missing.append(t)
+              if not os.path.exists(target):
+                  missing.append(target)
           if missing:
               print("unresolved local links:")
-              for m in missing:
-                  print(" ", m)
-              sys.exit(1)
+              for target in missing:
+                  print(" ", target)
+              raise SystemExit(1)
           print("all local README links resolve")
           EOF
 
       - name: README must not contain emoji
         run: |
           python - <<'EOF'
-          import sys
           text = open("README.md", encoding="utf-8").read()
-          bad = [c for c in text if ord(c) > 0x2100 and c not in "—–‘’“”"]
-          if bad:
-              print("non-ascii symbols found in README:", sorted(set(bad)))
-              sys.exit(1)
+          allowed = {"\u2013", "\u2014", "\u2018", "\u2019", "\u201c", "\u201d"}
+          invalid = [character for character in text if ord(character) > 0x2100 and character not in allowed]
+          if invalid:
+              print("non-ASCII symbols found in README:", sorted(set(invalid)))
+              raise SystemExit(1)
           print("README is emoji free")
           EOF
