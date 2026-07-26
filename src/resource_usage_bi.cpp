@@ -1,8 +1,8 @@
 #include "resource_usage_bi.h"
 #include "logger_bi.h"
+#include "paths_bi.h"
 
 #include <cctype>
-#include <cstring>
 #include <cwchar>
 #include <format>
 
@@ -20,7 +20,27 @@ static void formatMegabytes(std::string &out, ULONGLONG bytes, int unit)
         out = std::format("{} MB", (unsigned long long)(bytes / DIV));
 }
 
+resource_usage_bi::sampler_config_bi resource_usage_bi::captureSamplerConfig() const
+{
+    sampler_config_bi config;
+    config.memUnit = memUnit;
+    config.showCpuCores = cpuInfo.show_CoreUsagePercents;
+    config.showRamTotalPhys = ramInfo.show_ullTotalPhys;
+    config.showRamAvailPhys = ramInfo.show_ullAvailPhys;
+    config.showRamTotalPageFile = ramInfo.show_ullTotalPageFile;
+    config.showRamAvailPageFile = ramInfo.show_ullAvailPageFile;
+    config.showRamTotalVirtual = ramInfo.show_ullTotalVirtual;
+    config.showRamAvailVirtual = ramInfo.show_ullAvailVirtual;
+    config.showRamAvailExtendedVirtual = ramInfo.show_ullAvailExtendedVirtual;
+    return config;
+}
+
 bool resource_usage_bi::updateRam()
+{
+    return updateRamInto(ramInfo, captureSamplerConfig());
+}
+
+bool resource_usage_bi::updateRamInto(RamInfo &ram, const sampler_config_bi &config)
 {
     MEMORYSTATUSEX statex;
     statex.dwLength = sizeof(statex);
@@ -29,71 +49,107 @@ bool resource_usage_bi::updateRam()
         return false;
 
     if (statex.ullTotalPhys > 0)
-        ramInfo.loadValue =
+        ram.loadValue =
             (1.0 - (double)statex.ullAvailPhys / (double)statex.ullTotalPhys) * 100.0;
     else
-        ramInfo.loadValue = static_cast<double>(statex.dwMemoryLoad);
+        ram.loadValue = static_cast<double>(statex.dwMemoryLoad);
 
     if (statex.ullTotalPageFile > 0)
     {
-        ramInfo.commitValue =
+        ram.commitValue =
             (1.0 - (double)statex.ullAvailPageFile / (double)statex.ullTotalPageFile) * 100.0;
     }
 
-    ramInfo.totalGB = static_cast<double>(statex.ullTotalPhys) / (1024.0 * 1024.0 * 1024.0);
-    ramInfo.usedGB = static_cast<double>(statex.ullTotalPhys - statex.ullAvailPhys) /
-                     (1024.0 * 1024.0 * 1024.0);
+    ram.totalGB = static_cast<double>(statex.ullTotalPhys) / (1024.0 * 1024.0 * 1024.0);
+    ram.usedGB = static_cast<double>(statex.ullTotalPhys - statex.ullAvailPhys) /
+                 (1024.0 * 1024.0 * 1024.0);
 
-    ramInfo.dwMemoryLoad = std::format("{}%", (unsigned long)statex.dwMemoryLoad);
+    ram.dwMemoryLoad = std::format("{}%", (unsigned long)statex.dwMemoryLoad);
 
-    if (ramInfo.show_ullTotalPhys)
-        formatMegabytes(ramInfo.ullTotalPhys, statex.ullTotalPhys, memUnit);
-    if (ramInfo.show_ullAvailPhys)
-        formatMegabytes(ramInfo.ullAvailPhys, statex.ullAvailPhys, memUnit);
-    if (ramInfo.show_ullTotalPageFile)
-        formatMegabytes(ramInfo.ullTotalPageFile, statex.ullTotalPageFile, memUnit);
-    if (ramInfo.show_ullAvailPageFile)
-        formatMegabytes(ramInfo.ullAvailPageFile, statex.ullAvailPageFile, memUnit);
-    if (ramInfo.show_ullTotalVirtual)
-        formatMegabytes(ramInfo.ullTotalVirtual, statex.ullTotalVirtual, memUnit);
-    if (ramInfo.show_ullAvailVirtual)
-        formatMegabytes(ramInfo.ullAvailVirtual, statex.ullAvailVirtual, memUnit);
-    if (ramInfo.show_ullAvailExtendedVirtual)
-        formatMegabytes(ramInfo.ullAvailExtendedVirtual, statex.ullAvailExtendedVirtual, memUnit);
+    if (config.showRamTotalPhys)
+        formatMegabytes(ram.ullTotalPhys, statex.ullTotalPhys, config.memUnit);
+    if (config.showRamAvailPhys)
+        formatMegabytes(ram.ullAvailPhys, statex.ullAvailPhys, config.memUnit);
+    if (config.showRamTotalPageFile)
+        formatMegabytes(ram.ullTotalPageFile, statex.ullTotalPageFile, config.memUnit);
+    if (config.showRamAvailPageFile)
+        formatMegabytes(ram.ullAvailPageFile, statex.ullAvailPageFile, config.memUnit);
+    if (config.showRamTotalVirtual)
+        formatMegabytes(ram.ullTotalVirtual, statex.ullTotalVirtual, config.memUnit);
+    if (config.showRamAvailVirtual)
+        formatMegabytes(ram.ullAvailVirtual, statex.ullAvailVirtual, config.memUnit);
+    if (config.showRamAvailExtendedVirtual)
+        formatMegabytes(ram.ullAvailExtendedVirtual, statex.ullAvailExtendedVirtual,
+                        config.memUnit);
 
     return true;
 }
 
 bool resource_usage_bi::updateDisk()
 {
+    EnterCriticalSection(&sampleLock);
+    bool ok = updateDiskInto(disksInfo);
+
+    EnterCriticalSection(&publishLock);
+    pubDisks = disksInfo;
+    LeaveCriticalSection(&publishLock);
+
+    LeaveCriticalSection(&sampleLock);
+    return ok;
+}
+
+bool resource_usage_bi::updateDiskInto(std::vector<DiskInfo> &disks)
+{
     DWORD drives = GetLogicalDrives();
-    disksInfo.clear();
+    if (drives == 0)
+        return false;
 
-    for (char drive = 'A'; drive <= 'Z'; ++drive)
+    std::vector<DiskInfo> sampledDisks;
+
+    for (wchar_t drive = L'A'; drive <= L'Z'; ++drive)
     {
-        if (drives & (1 << (drive - 'A')))
+        DWORD mask = 1UL << (drive - L'A');
+        if ((drives & mask) == 0)
+            continue;
+
+        std::wstring rootPath(1, drive);
+        rootPath += L":\\";
+
+        UINT driveType = GetDriveTypeW(rootPath.c_str());
+        // The allow-list excludes mapped remote and media-only roots before
+        // GetDiskFreeSpaceExW can block on an unavailable endpoint.
+        if (driveType != DRIVE_FIXED &&
+            driveType != DRIVE_REMOVABLE &&
+            driveType != DRIVE_RAMDISK)
         {
-            std::string rootPath = std::string(1, drive) + ":\\";
-            DiskInfo disk;
-            disk.diskLetter = rootPath;
-
-            ULARGE_INTEGER freeBytes, totalBytes, totalFreeBytes;
-            if (GetDiskFreeSpaceExA(rootPath.c_str(), &freeBytes, &totalBytes, &totalFreeBytes))
-            {
-                disk.totalSpace = std::to_string(totalBytes.QuadPart / DIV) + " MB";
-                disk.freeSpace = std::to_string(freeBytes.QuadPart / DIV) + " MB";
-                disk.usedSpace = std::to_string((totalBytes.QuadPart - freeBytes.QuadPart) / DIV) + " MB";
-
-                double usage = (1.0 - (static_cast<double>(freeBytes.QuadPart) / totalBytes.QuadPart)) * 100;
-                std::ostringstream oss;
-                oss << std::fixed << std::setprecision(2) << usage << " %";
-                disk.usagePercent = oss.str();
-
-                disksInfo.push_back(disk);
-            }
+            continue;
         }
+
+        ULARGE_INTEGER freeBytes = {};
+        ULARGE_INTEGER totalBytes = {};
+        if (!GetDiskFreeSpaceExW(rootPath.c_str(), &freeBytes, &totalBytes, NULL) ||
+            totalBytes.QuadPart == 0)
+        {
+            continue;
+        }
+
+        DiskInfo disk;
+        disk.diskLetter = paths_bi::wideToUtf8(rootPath);
+        disk.totalSpace = std::to_string(totalBytes.QuadPart / DIV) + " MB";
+        disk.freeSpace = std::to_string(freeBytes.QuadPart / DIV) + " MB";
+        disk.usedSpace =
+            std::to_string((totalBytes.QuadPart - freeBytes.QuadPart) / DIV) + " MB";
+
+        double usage =
+            (1.0 - static_cast<double>(freeBytes.QuadPart) /
+                       static_cast<double>(totalBytes.QuadPart)) *
+            100.0;
+        disk.usagePercent = std::format("{:.2f} %", usage);
+        sampledDisks.push_back(disk);
     }
-    return !disksInfo.empty();
+
+    disks.swap(sampledDisks);
+    return !disks.empty();
 }
 
 static ULONGLONG octetDelta(DWORD current, DWORD previous)
@@ -106,19 +162,32 @@ static ULONGLONG octetDelta(DWORD current, DWORD previous)
 
 bool resource_usage_bi::updateNetwork()
 {
-    MIB_IFTABLE *pIfTable = NULL;
-    DWORD dwSize = 0;
+    EnterCriticalSection(&sampleLock);
+    bool ok = updateNetworkInto(networkInfo);
 
-    if (GetIfTable(NULL, &dwSize, FALSE) != ERROR_INSUFFICIENT_BUFFER || dwSize == 0)
-        return false;
+    EnterCriticalSection(&publishLock);
+    pubNetwork = networkInfo;
+    LeaveCriticalSection(&publishLock);
 
-    pIfTable = (MIB_IFTABLE *)malloc(dwSize);
-    if (!pIfTable)
-        return false;
+    LeaveCriticalSection(&sampleLock);
+    return ok;
+}
 
-    if (GetIfTable(pIfTable, &dwSize, TRUE) != NO_ERROR)
+bool resource_usage_bi::updateNetworkInto(std::vector<NetworkInfo> &network)
+{
+    DWORD tableSize = 0;
+
+    if (GetIfTable(NULL, &tableSize, FALSE) != ERROR_INSUFFICIENT_BUFFER ||
+        tableSize == 0)
     {
-        free(pIfTable);
+        return false;
+    }
+
+    std::vector<BYTE> tableBuffer(tableSize);
+    MIB_IFTABLE *ifTable = reinterpret_cast<MIB_IFTABLE *>(&tableBuffer[0]);
+
+    if (GetIfTable(ifTable, &tableSize, TRUE) != NO_ERROR)
+    {
         return false;
     }
 
@@ -127,23 +196,18 @@ bool resource_usage_bi::updateNetwork()
                          ? (double)(now - netPrevTick) / 1000.0
                          : 0.0;
 
-    networkInfo.clear();
+    std::vector<NetworkInfo> sampledNetwork;
 
-    for (DWORD i = 0; i < pIfTable->dwNumEntries; ++i)
+    for (DWORD i = 0; i < ifTable->dwNumEntries; ++i)
     {
         NetworkInfo netInfo;
-        const MIB_IFROW &row = pIfTable->table[i];
+        const MIB_IFROW &row = ifTable->table[i];
 
-        wchar_t wname[MAX_INTERFACE_NAME_LEN + 1];
         size_t wlen = 0;
         while (wlen < MAX_INTERFACE_NAME_LEN && row.wszName[wlen] != L'\0')
             ++wlen;
-        memcpy(wname, row.wszName, wlen * sizeof(wchar_t));
-        wname[wlen] = L'\0';
-
-        char name[(MAX_INTERFACE_NAME_LEN + 1) * 2] = {0};
-        WideCharToMultiByte(CP_ACP, 0, wname, -1, name, sizeof(name) - 1, NULL, NULL);
-        netInfo.interfaceName = name;
+        netInfo.interfaceName =
+            paths_bi::wideToUtf8(std::wstring(row.wszName, wlen));
 
         NetCounters previous = {0, 0};
         std::map<DWORD, NetCounters>::const_iterator it = netPrev.find(row.dwIndex);
@@ -170,29 +234,31 @@ bool resource_usage_bi::updateNetwork()
         current.out = row.dwOutOctets;
         netPrev[row.dwIndex] = current;
 
-        networkInfo.push_back(netInfo);
+        sampledNetwork.push_back(netInfo);
     }
 
     netPrevTick = now;
-    free(pIfTable);
+    network.swap(sampledNetwork);
     return true;
 }
 
 void resource_usage_bi::initCpuInfo()
 {
-    HKEY hKey;
-    if (RegOpenKeyEx(HKEY_LOCAL_MACHINE,
-                     "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
-                     0, KEY_READ, &hKey) == ERROR_SUCCESS)
+    HKEY hKey = NULL;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+                      L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+                      0, KEY_READ, &hKey) == ERROR_SUCCESS)
     {
-
-        char cpuName[257] = {0};
-        DWORD size = sizeof(cpuName) - 1;
-        if (RegQueryValueEx(hKey, "ProcessorNameString", NULL, NULL,
-                            (LPBYTE)cpuName, &size) == ERROR_SUCCESS)
+        wchar_t cpuName[257] = {};
+        DWORD size = sizeof(cpuName);
+        DWORD type = 0;
+        if (RegQueryValueExW(hKey, L"ProcessorNameString", NULL, &type,
+                             reinterpret_cast<LPBYTE>(cpuName), &size) ==
+                ERROR_SUCCESS &&
+            (type == REG_SZ || type == REG_EXPAND_SZ))
         {
-            cpuName[sizeof(cpuName) - 1] = '\0';
-            cpuInfo.cpuName = cpuName;
+            cpuName[(sizeof(cpuName) / sizeof(cpuName[0])) - 1] = L'\0';
+            cpuInfo.cpuName = paths_bi::wideToUtf8(cpuName);
         }
         RegCloseKey(hKey);
     }
@@ -233,7 +299,6 @@ bool resource_usage_bi::openSharedQuery()
     cpuCoreCount = sysInfo.dwNumberOfProcessors;
 
     cpuCoreCounters.assign(cpuCoreCount, (PDH_HCOUNTER)NULL);
-    cpuInfo.CoreUsagePercents.assign(cpuCoreCount, std::string("-"));
 
     for (DWORD i = 0; i < cpuCoreCount; ++i)
     {
@@ -292,6 +357,14 @@ bool resource_usage_bi::collectShared()
 
 bool resource_usage_bi::updateCpu()
 {
+    EnterCriticalSection(&sampleLock);
+    bool ok = updateCpuInto(cpuInfo, cpuInfo.show_CoreUsagePercents);
+    LeaveCriticalSection(&sampleLock);
+    return ok;
+}
+
+bool resource_usage_bi::updateCpuInto(CpuInfo &cpu, bool showCores)
+{
     if (!sharedCollected || cpuTotalCounter == NULL)
         return false;
 
@@ -304,18 +377,21 @@ bool resource_usage_bi::updateCpu()
     if (value.CStatus != ERROR_SUCCESS)
         return false;
 
-    cpuInfo.UsageValue = value.doubleValue;
+    cpu.UsageValue = value.doubleValue;
 
-    cpuInfo.UsagePercent = std::format("{:.2f}%", cpuInfo.UsageValue);
+    cpu.UsagePercent = std::format("{:.2f}%", cpu.UsageValue);
 
-    if (!cpuInfo.show_CoreUsagePercents)
+    if (cpu.CoreUsagePercents.size() != cpuCoreCount)
+        cpu.CoreUsagePercents.assign(cpuCoreCount, std::string("-"));
+
+    if (!showCores)
         return true;
 
     for (DWORD i = 0; i < cpuCoreCount; ++i)
     {
         if (cpuCoreCounters[i] == NULL)
         {
-            cpuInfo.CoreUsagePercents[i] = "N/A";
+            cpu.CoreUsagePercents[i] = "N/A";
             continue;
         }
 
@@ -324,11 +400,11 @@ bool resource_usage_bi::updateCpu()
                 ERROR_SUCCESS &&
             core.CStatus == ERROR_SUCCESS)
         {
-            cpuInfo.CoreUsagePercents[i] = std::format("{:.2f}%", core.doubleValue);
+            cpu.CoreUsagePercents[i] = std::format("{:.2f}%", core.doubleValue);
         }
         else
         {
-            cpuInfo.CoreUsagePercents[i] = "N/A";
+            cpu.CoreUsagePercents[i] = "N/A";
         }
     }
 
@@ -337,19 +413,18 @@ bool resource_usage_bi::updateCpu()
 
 void resource_usage_bi::initGpuInfo()
 {
-    DISPLAY_DEVICEA dd;
-    ZeroMemory(&dd, sizeof(dd));
-    dd.cb = sizeof(dd);
-
-    for (DWORD i = 0; EnumDisplayDevicesA(NULL, i, &dd, 0); ++i)
+    for (DWORD i = 0;; ++i)
     {
-        if (dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
+        DISPLAY_DEVICEW display = {};
+        display.cb = sizeof(display);
+        if (!EnumDisplayDevicesW(NULL, i, &display, 0))
+            break;
+
+        if (display.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
         {
-            gpuInfo.gpuName = dd.DeviceString;
+            gpuInfo.gpuName = paths_bi::wideToUtf8(display.DeviceString);
             break;
         }
-        ZeroMemory(&dd, sizeof(dd));
-        dd.cb = sizeof(dd);
     }
 
     if (gpuInfo.gpuName.empty())
@@ -387,11 +462,7 @@ void resource_usage_bi::initGpuInfo()
                 totalDedicated += mem;
 
                 AdapterInfo ai;
-                char nameBuf[256];
-                int len = WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1,
-                                              nameBuf, sizeof(nameBuf), NULL, NULL);
-                if (len > 0)
-                    ai.adapterName = nameBuf;
+                ai.adapterName = paths_bi::wideToUtf8(desc.Description);
                 ai.totalVramMB = (double)mem / (1024.0 * 1024.0);
                 adapters.push_back(ai);
             }
@@ -414,6 +485,47 @@ bool resource_usage_bi::updateGpu()
     return updateGpuTime(0, NULL);
 }
 
+bool resource_usage_bi::updateAll()
+{
+    bool success = updateRam();
+
+    EnterCriticalSection(&sampleLock);
+    bool collected = collectShared();
+    success &= collected;
+    if (collected)
+    {
+        success &= updateCpuInto(cpuInfo, cpuInfo.show_CoreUsagePercents);
+        success &= updateGpuTimeInto(0, NULL, gpuInfo);
+        updateCpuPowerInto(cpuInfo, gpuInfo);
+    }
+    LeaveCriticalSection(&sampleLock);
+
+    updateTemps();
+    success &= updateDisk();
+    success &= updateNetwork();
+    return success;
+}
+
+bool resource_usage_bi::updateHudSample()
+{
+    EnterCriticalSection(&sampleLock);
+
+    if (!collectShared())
+    {
+        LeaveCriticalSection(&sampleLock);
+        return false;
+    }
+
+    bool success = updateCpuInto(cpuInfo, cpuInfo.show_CoreUsagePercents);
+    updateCpuPowerInto(cpuInfo, gpuInfo);
+    updateGpuMemoryInto(gpuInfo, adapters);
+
+    LeaveCriticalSection(&sampleLock);
+
+    updateTemps();
+    return success;
+}
+
 DWORD WINAPI resource_usage_bi::samplerEntry(LPVOID param)
 {
     ((resource_usage_bi *)param)->samplerLoop();
@@ -422,44 +534,105 @@ DWORD WINAPI resource_usage_bi::samplerEntry(LPVOID param)
 
 void resource_usage_bi::samplerLoop()
 {
+    HRESULT comStatus = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    bool uninitializeCom = SUCCEEDED(comStatus);
+    if (FAILED(comStatus))
+    {
+        log_bi::write("sampler: COM MTA initialization failed (0x%08lX); "
+                      "WMI temperatures may be unavailable",
+                      static_cast<unsigned long>(comStatus));
+    }
+
+    CpuInfo sampleCpu;
+    RamInfo sampleRam;
+    GpuInfo sampleGpu;
+    std::vector<AdapterInfo> sampleAdapters;
+    std::vector<DiskInfo> sampleDisks;
+    std::vector<NetworkInfo> sampleNetwork;
+    ULONGLONG lastSlowSampleTick = 0;
+
+    EnterCriticalSection(&publishLock);
+    sampleCpu = pubCpu;
+    sampleRam = pubRam;
+    sampleGpu = pubGpu;
+    sampleAdapters = pubAdapters;
+    sampleDisks = pubDisks;
+    sampleNetwork = pubNetwork;
+    LeaveCriticalSection(&publishLock);
+
     for (;;)
     {
-        DWORD interval = (DWORD)InterlockedCompareExchange(&samplerIntervalMs, 0, 0);
+        DWORD interval = (DWORD)samplerIntervalMs.load(std::memory_order_acquire);
         if (interval < 50)
             interval = 50;
 
         if (WaitForSingleObject(samplerStop, interval) != WAIT_TIMEOUT)
-            return;
+            break;
 
-        if (!collectShared())
-            continue;
+        sampler_config_bi config;
+        EnterCriticalSection(&publishLock);
+        config = samplerConfig;
+        LeaveCriticalSection(&publishLock);
 
-        updateCpu();
-        updateCpuPower();
-        updateGpuMemory();
-        updateRam();
+        EnterCriticalSection(&sampleLock);
 
-        DWORD pid = (DWORD)InterlockedCompareExchange(&samplerTargetPid, 0, 0);
+        collectShared();
+        updateCpuInto(sampleCpu, config.showCpuCores);
+        updateCpuPowerInto(sampleCpu, sampleGpu);
+        updateGpuMemoryInto(sampleGpu, sampleAdapters);
+        updateRamInto(sampleRam, config);
+
+        DWORD pid = samplerTargetPid.load(std::memory_order_acquire);
 
         double busyMs = 0.0;
-        bool busyOk = updateGpuTime(pid, &busyMs);
+        bool busyOk = updateGpuTimeInto(pid, &busyMs, sampleGpu);
 
-        publishSample(busyMs, busyOk);
+        ULONGLONG slowSampleTick = GetTickCount64();
+        if (lastSlowSampleTick == 0 ||
+            slowSampleTick - lastSlowSampleTick >= 1000)
+        {
+            updateTempsInto(sampleCpu, sampleGpu);
+            updateDiskInto(sampleDisks);
+            updateNetworkInto(sampleNetwork);
+            lastSlowSampleTick = GetTickCount64();
+        }
 
+        LeaveCriticalSection(&sampleLock);
+
+        publishSample(sampleCpu, sampleRam, sampleGpu, sampleAdapters, sampleDisks,
+                      sampleNetwork, busyMs, busyOk);
     }
+
+    EnterCriticalSection(&sampleLock);
+    if (thermalSvc != NULL)
+    {
+        thermalSvc->Release();
+        thermalSvc = NULL;
+    }
+    LeaveCriticalSection(&sampleLock);
+
+    if (uninitializeCom)
+        CoUninitialize();
 }
 
-void resource_usage_bi::publishSample(double gpuBusyMs, bool gpuBusyValid)
+void resource_usage_bi::publishSample(const CpuInfo &cpu, const RamInfo &ram,
+                                      const GpuInfo &gpu,
+                                      const std::vector<AdapterInfo> &sampleAdapters,
+                                      const std::vector<DiskInfo> &sampleDisks,
+                                      const std::vector<NetworkInfo> &sampleNetwork,
+                                      double gpuBusyMs, bool gpuBusyValid)
 {
     if (!publishLockReady)
         return;
 
     EnterCriticalSection(&publishLock);
 
-    pubCpu = cpuInfo;
-    pubRam = ramInfo;
-    pubGpu = gpuInfo;
-    pubAdapters = adapters;
+    pubCpu = cpu;
+    pubRam = ram;
+    pubGpu = gpu;
+    pubAdapters = sampleAdapters;
+    pubDisks = sampleDisks;
+    pubNetwork = sampleNetwork;
     pubGpuBusyMs = gpuBusyMs;
     pubGpuBusyValid = gpuBusyValid;
 
@@ -473,22 +646,81 @@ void resource_usage_bi::readSnapshot(CpuInfo *cpu, RamInfo *ram, GpuInfo *gpu,
     if (!publishLockReady)
         return;
 
+    // UI-owned presentation settings are sampled only by the UI thread and
+    // handed to the worker under the publication lock.
+    sampler_config_bi config = captureSamplerConfig();
+    CpuInfo sampledCpu;
+    RamInfo sampledRam;
+    GpuInfo sampledGpu;
+    std::vector<AdapterInfo> sampledAdapters;
+    std::vector<DiskInfo> sampledDisks;
+    std::vector<NetworkInfo> sampledNetwork;
+    double sampledBusyMs = 0.0;
+    bool sampledBusyValid = false;
+
     EnterCriticalSection(&publishLock);
+    samplerConfig = config;
+    sampledCpu = pubCpu;
+    sampledRam = pubRam;
+    sampledGpu = pubGpu;
+    sampledAdapters = pubAdapters;
+    sampledDisks = pubDisks;
+    sampledNetwork = pubNetwork;
+    sampledBusyMs = pubGpuBusyMs;
+    sampledBusyValid = pubGpuBusyValid;
+    LeaveCriticalSection(&publishLock);
+
+    // The worker never writes the public structures. Refresh measurement fields
+    // here, on the UI thread, while preserving presentation settings.
+    cpuInfo.UsagePercent = sampledCpu.UsagePercent;
+    cpuInfo.CoreUsagePercents = sampledCpu.CoreUsagePercents;
+    cpuInfo.UsageValue = sampledCpu.UsageValue;
+    cpuInfo.packagePower = sampledCpu.packagePower;
+    cpuInfo.packagePowerW = sampledCpu.packagePowerW;
+    cpuInfo.packagePowerAvailable = sampledCpu.packagePowerAvailable;
+    cpuInfo.cpuTempC = sampledCpu.cpuTempC;
+    cpuInfo.cpuTempAvailable = sampledCpu.cpuTempAvailable;
+    cpuInfo.cpuTempApproximate = sampledCpu.cpuTempApproximate;
+
+    ramInfo.dwMemoryLoad = sampledRam.dwMemoryLoad;
+    ramInfo.ullTotalPhys = sampledRam.ullTotalPhys;
+    ramInfo.ullAvailPhys = sampledRam.ullAvailPhys;
+    ramInfo.ullTotalPageFile = sampledRam.ullTotalPageFile;
+    ramInfo.ullAvailPageFile = sampledRam.ullAvailPageFile;
+    ramInfo.ullTotalVirtual = sampledRam.ullTotalVirtual;
+    ramInfo.ullAvailVirtual = sampledRam.ullAvailVirtual;
+    ramInfo.ullAvailExtendedVirtual = sampledRam.ullAvailExtendedVirtual;
+    ramInfo.loadValue = sampledRam.loadValue;
+    ramInfo.commitValue = sampledRam.commitValue;
+    ramInfo.usedGB = sampledRam.usedGB;
+    ramInfo.totalGB = sampledRam.totalGB;
+
+    gpuInfo.gpuLoad = sampledGpu.gpuLoad;
+    gpuInfo.gpuLoadValue = sampledGpu.gpuLoadValue;
+    gpuInfo.vramUsedMB = sampledGpu.vramUsedMB;
+    gpuInfo.vramTotalMB = sampledGpu.vramTotalMB;
+    gpuInfo.vramAvailable = sampledGpu.vramAvailable;
+    gpuInfo.gpuPower = sampledGpu.gpuPower;
+    gpuInfo.gpuPowerW = sampledGpu.gpuPowerW;
+    gpuInfo.gpuPowerAvailable = sampledGpu.gpuPowerAvailable;
+    gpuInfo.gpuTempC = sampledGpu.gpuTempC;
+    gpuInfo.gpuTempAvailable = sampledGpu.gpuTempAvailable;
+    adapters = sampledAdapters;
+    disksInfo = sampledDisks;
+    networkInfo = sampledNetwork;
 
     if (cpu)
-        *cpu = pubCpu;
+        *cpu = cpuInfo;
     if (ram)
-        *ram = pubRam;
+        *ram = ramInfo;
     if (gpu)
-        *gpu = pubGpu;
+        *gpu = gpuInfo;
     if (gpuBusyMs)
-        *gpuBusyMs = pubGpuBusyMs;
+        *gpuBusyMs = sampledBusyMs;
     if (gpuBusyValid)
-        *gpuBusyValid = pubGpuBusyValid;
+        *gpuBusyValid = sampledBusyValid;
     if (adaptersOut)
-        *adaptersOut = pubAdapters;
-
-    LeaveCriticalSection(&publishLock);
+        *adaptersOut = adapters;
 }
 
 void resource_usage_bi::setSamplerInterval(int intervalMs)
@@ -498,25 +730,48 @@ void resource_usage_bi::setSamplerInterval(int intervalMs)
     if (intervalMs > 5000)
         intervalMs = 5000;
 
-    InterlockedExchange(&samplerIntervalMs, (LONG)intervalMs);
+    samplerIntervalMs.store((LONG)intervalMs, std::memory_order_release);
 }
 
 void resource_usage_bi::setSamplerTarget(DWORD pid)
 {
-    InterlockedExchange(&samplerTargetPid, (LONG)pid);
+    samplerTargetPid.store(pid, std::memory_order_release);
 }
 
 void resource_usage_bi::startSampler(int intervalMs)
 {
-    if (samplerThread)
+    EnterCriticalSection(&samplerLifecycleLock);
+
+    if (cleanupDone)
+    {
+        log_bi::write("sampler: cannot restart after resource cleanup");
+        LeaveCriticalSection(&samplerLifecycleLock);
         return;
+    }
+
+    if (samplerThread)
+    {
+        LeaveCriticalSection(&samplerLifecycleLock);
+        return;
+    }
 
     setSamplerInterval(intervalMs);
+
+    EnterCriticalSection(&publishLock);
+    pubCpu = cpuInfo;
+    pubRam = ramInfo;
+    pubGpu = gpuInfo;
+    pubAdapters = adapters;
+    pubDisks = disksInfo;
+    pubNetwork = networkInfo;
+    samplerConfig = captureSamplerConfig();
+    LeaveCriticalSection(&publishLock);
 
     samplerStop = CreateEvent(NULL, TRUE, FALSE, NULL);
     if (!samplerStop)
     {
         log_bi::write("sampler: could not create the stop event");
+        LeaveCriticalSection(&samplerLifecycleLock);
         return;
     }
 
@@ -527,23 +782,42 @@ void resource_usage_bi::startSampler(int intervalMs)
         log_bi::write("sampler: could not start the worker thread");
         CloseHandle(samplerStop);
         samplerStop = NULL;
+        LeaveCriticalSection(&samplerLifecycleLock);
         return;
     }
 
     SetThreadPriority(samplerThread, THREAD_PRIORITY_BELOW_NORMAL);
 
     log_bi::write("sampler: worker started at %d ms", intervalMs);
+    LeaveCriticalSection(&samplerLifecycleLock);
 }
 
 void resource_usage_bi::stopSampler()
 {
+    EnterCriticalSection(&samplerLifecycleLock);
+
     if (!samplerThread)
+    {
+        LeaveCriticalSection(&samplerLifecycleLock);
         return;
+    }
 
     if (samplerStop)
         SetEvent(samplerStop);
 
-    WaitForSingleObject(samplerThread, 4000);
+    DWORD waitResult = WaitForSingleObject(samplerThread, INFINITE);
+    bool waitFailureLogged = false;
+    while (waitResult != WAIT_OBJECT_0)
+    {
+        if (!waitFailureLogged)
+        {
+            log_bi::writeErr(GetLastError(),
+                             "sampler: failed to confirm worker exit; retrying");
+            waitFailureLogged = true;
+        }
+        Sleep(10);
+        waitResult = WaitForSingleObject(samplerThread, INFINITE);
+    }
 
     CloseHandle(samplerThread);
     samplerThread = NULL;
@@ -553,12 +827,23 @@ void resource_usage_bi::stopSampler()
         CloseHandle(samplerStop);
         samplerStop = NULL;
     }
+
+    LeaveCriticalSection(&samplerLifecycleLock);
 }
 
 bool resource_usage_bi::updateGpuMemory()
 {
-    gpuInfo.vramAvailable = false;
-    for (auto &a : adapters)
+    EnterCriticalSection(&sampleLock);
+    bool ok = updateGpuMemoryInto(gpuInfo, adapters);
+    LeaveCriticalSection(&sampleLock);
+    return ok;
+}
+
+bool resource_usage_bi::updateGpuMemoryInto(
+    GpuInfo &gpu, std::vector<AdapterInfo> &sampleAdapters)
+{
+    gpu.vramAvailable = false;
+    for (auto &a : sampleAdapters)
         a.available = false;
 
     if (!sharedCollected || vramCounter == NULL)
@@ -582,8 +867,8 @@ bool resource_usage_bi::updateGpuMemory()
 
     LONGLONG total = 0;
 
-    if (itemCount > adapters.size())
-        adapters.resize(itemCount);
+    if (itemCount > sampleAdapters.size())
+        sampleAdapters.resize(itemCount);
 
     for (DWORD i = 0; i < itemCount; ++i)
     {
@@ -595,16 +880,13 @@ bool resource_usage_bi::updateGpuMemory()
         if (val > 0)
         {
             total += val;
-            adapters[i].usedVramMB = (double)val / (1024.0 * 1024.0);
-            adapters[i].available = true;
+            sampleAdapters[i].usedVramMB = (double)val / (1024.0 * 1024.0);
+            sampleAdapters[i].available = true;
 
-            if (adapters[i].adapterName.empty())
+            if (sampleAdapters[i].adapterName.empty())
             {
-                char buf[256];
-                int len = WideCharToMultiByte(CP_UTF8, 0, items[i].szName, -1,
-                                              buf, sizeof(buf), NULL, NULL);
-                if (len > 0)
-                    adapters[i].adapterName = buf;
+                sampleAdapters[i].adapterName = paths_bi::wideToUtf8(
+                    items[i].szName ? std::wstring(items[i].szName) : std::wstring());
             }
         }
     }
@@ -620,16 +902,24 @@ bool resource_usage_bi::updateGpuMemory()
         return false;
     }
 
-    gpuInfo.vramUsedMB = (double)total / (1024.0 * 1024.0);
-    gpuInfo.vramAvailable = true;
+    gpu.vramUsedMB = (double)total / (1024.0 * 1024.0);
+    gpu.vramAvailable = true;
 
     return true;
 }
 
 bool resource_usage_bi::updateCpuPower()
 {
-    cpuInfo.packagePowerAvailable = false;
-    gpuInfo.gpuPowerAvailable = false;
+    EnterCriticalSection(&sampleLock);
+    bool ok = updateCpuPowerInto(cpuInfo, gpuInfo);
+    LeaveCriticalSection(&sampleLock);
+    return ok;
+}
+
+bool resource_usage_bi::updateCpuPowerInto(CpuInfo &cpu, GpuInfo &gpu)
+{
+    cpu.packagePowerAvailable = false;
+    gpu.gpuPowerAvailable = false;
 
     if (!sharedCollected || powerCounter == NULL)
         return false;
@@ -702,9 +992,9 @@ bool resource_usage_bi::updateCpuPower()
 
     if (gpuMilliwatts >= 0.0)
     {
-        gpuInfo.gpuPowerW = gpuMilliwatts / 1000.0;
-        gpuInfo.gpuPowerAvailable = true;
-        gpuInfo.gpuPower = std::format("{:.2f} W", gpuInfo.gpuPowerW);
+        gpu.gpuPowerW = gpuMilliwatts / 1000.0;
+        gpu.gpuPowerAvailable = true;
+        gpu.gpuPower = std::format("{:.2f} W", gpu.gpuPowerW);
     }
 
     if (packageMilliwatts < 0.0)
@@ -725,9 +1015,9 @@ bool resource_usage_bi::updateCpuPower()
         powerLogged = true;
     }
 
-    cpuInfo.packagePowerW = packageMilliwatts / 1000.0;
-    cpuInfo.packagePowerAvailable = true;
-    cpuInfo.packagePower = std::format("{:.2f} W", cpuInfo.packagePowerW);
+    cpu.packagePowerW = packageMilliwatts / 1000.0;
+    cpu.packagePowerAvailable = true;
+    cpu.packagePower = std::format("{:.2f} W", cpu.packagePowerW);
 
     return true;
 }
@@ -833,9 +1123,13 @@ bool resource_usage_bi::readThermalZonePdh(double *celsiusOut)
             if (!plausibleZoneTemp(celsius))
                 continue;
 
-            std::string name;
-            for (const wchar_t *p = items[i].szName; p && *p; ++p)
-                name += (char)tolower((int)(*p & 0xFF));
+            std::string name = paths_bi::wideToUtf8(
+                items[i].szName ? std::wstring(items[i].szName) : std::wstring());
+            for (char &character : name)
+            {
+                character = static_cast<char>(
+                    std::tolower(static_cast<unsigned char>(character)));
+            }
 
             if (zoneNamesCpu(name) && celsius > bestCpu)
             {
@@ -876,9 +1170,8 @@ bool resource_usage_bi::readThermalZoneWmi(double *celsiusOut)
 
     if (thermalSvc == NULL)
     {
-        // The constructor already put this thread in an MTA; connect once and
-        // keep the proxy, a fresh ConnectServer every second is far too costly
-        // for a UI-thread poll.
+        // The sampler owns an MTA for its whole lifetime. Keep the proxy on
+        // that worker instead of reconnecting for every slow sample.
         IWbemLocator *pLoc = NULL;
         if (FAILED(CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER,
                                     IID_IWbemLocator, (LPVOID *)&pLoc)) ||
@@ -935,9 +1228,22 @@ bool resource_usage_bi::readThermalZoneWmi(double *celsiusOut)
 
     IWbemClassObject *pObj = NULL;
     ULONG ret = 0;
+    ULONGLONG enumerationStarted = GetTickCount64();
 
-    while (pEnum->Next(1000, 1, &pObj, &ret) == S_OK && pObj)
+    for (ULONG objectCount = 0;
+         objectCount < 64 && GetTickCount64() - enumerationStarted < 500;
+         ++objectCount)
     {
+        pObj = NULL;
+        ret = 0;
+        HRESULT nextStatus = pEnum->Next(100, 1, &pObj, &ret);
+        if (nextStatus != S_OK || ret != 1 || pObj == NULL)
+        {
+            if (pObj != NULL)
+                pObj->Release();
+            break;
+        }
+
         VARIANT vt;
         VariantInit(&vt);
 
@@ -955,8 +1261,13 @@ bool resource_usage_bi::readThermalZoneWmi(double *celsiusOut)
 
                 if (SUCCEEDED(pObj->Get(L"InstanceName", 0, &inst, 0, 0)) && inst.vt == VT_BSTR)
                 {
-                    for (const wchar_t *p = inst.bstrVal; p && *p; ++p)
-                        name += (char)tolower((int)(*p & 0xFF));
+                    name = paths_bi::wideToUtf8(
+                        inst.bstrVal ? std::wstring(inst.bstrVal) : std::wstring());
+                    for (char &character : name)
+                    {
+                        character = static_cast<char>(
+                            std::tolower(static_cast<unsigned char>(character)));
+                    }
                 }
                 VariantClear(&inst);
 
@@ -997,20 +1308,73 @@ bool resource_usage_bi::readThermalZoneWmi(double *celsiusOut)
 
 bool resource_usage_bi::updateTemps()
 {
-    cpuInfo.cpuTempAvailable = false;
-    gpuInfo.gpuTempAvailable = false;
-
-    gpu_sensor_bi::reading_bi gpu;
-    if (gpuSensor.readTemperature(&gpu))
+    EnterCriticalSection(&samplerLifecycleLock);
+    if (samplerThread != NULL)
     {
-        gpuInfo.gpuTempC = gpu.temperatureC;
-        gpuInfo.gpuTempAvailable = true;
+        CpuInfo sampledCpu;
+        GpuInfo sampledGpu;
+
+        EnterCriticalSection(&publishLock);
+        sampledCpu = pubCpu;
+        sampledGpu = pubGpu;
+        LeaveCriticalSection(&publishLock);
+        LeaveCriticalSection(&samplerLifecycleLock);
+
+        cpuInfo.cpuTempC = sampledCpu.cpuTempC;
+        cpuInfo.cpuTempAvailable = sampledCpu.cpuTempAvailable;
+        cpuInfo.cpuTempApproximate = sampledCpu.cpuTempApproximate;
+        gpuInfo.gpuTempC = sampledGpu.gpuTempC;
+        gpuInfo.gpuTempAvailable = sampledGpu.gpuTempAvailable;
+        return cpuInfo.cpuTempAvailable || gpuInfo.gpuTempAvailable;
+    }
+
+    HRESULT comStatus = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    bool uninitializeCom = SUCCEEDED(comStatus);
+
+    EnterCriticalSection(&sampleLock);
+    bool ok = updateTempsInto(cpuInfo, gpuInfo);
+
+    // The sampler keeps its proxy for repeated reads. A synchronous wrapper
+    // must not leave a proxy tied to the caller's apartment after it returns.
+    if (thermalSvc != NULL)
+    {
+        thermalSvc->Release();
+        thermalSvc = NULL;
+    }
+
+    EnterCriticalSection(&publishLock);
+    pubCpu.cpuTempC = cpuInfo.cpuTempC;
+    pubCpu.cpuTempAvailable = cpuInfo.cpuTempAvailable;
+    pubCpu.cpuTempApproximate = cpuInfo.cpuTempApproximate;
+    pubGpu.gpuTempC = gpuInfo.gpuTempC;
+    pubGpu.gpuTempAvailable = gpuInfo.gpuTempAvailable;
+    LeaveCriticalSection(&publishLock);
+
+    LeaveCriticalSection(&sampleLock);
+
+    if (uninitializeCom)
+        CoUninitialize();
+
+    LeaveCriticalSection(&samplerLifecycleLock);
+    return ok;
+}
+
+bool resource_usage_bi::updateTempsInto(CpuInfo &cpu, GpuInfo &gpuInfoSample)
+{
+    cpu.cpuTempAvailable = false;
+    gpuInfoSample.gpuTempAvailable = false;
+
+    gpu_sensor_bi::reading_bi gpuReading;
+    if (gpuSensor.readTemperature(&gpuReading))
+    {
+        gpuInfoSample.gpuTempC = gpuReading.temperatureC;
+        gpuInfoSample.gpuTempAvailable = true;
 
         if (!gpuTempLogged)
         {
             log_bi::write("temps: gpu from %s on '%s', %.1f C (limit %.0f C)",
-                          gpu.source, gpu.adapterName.c_str(), gpu.temperatureC,
-                          gpu.temperatureMaxC);
+                          gpuReading.source, gpuReading.adapterName.c_str(),
+                          gpuReading.temperatureC, gpuReading.temperatureMaxC);
             gpuTempLogged = true;
         }
     }
@@ -1026,15 +1390,15 @@ bool resource_usage_bi::updateTemps()
     double cpuCelsius = 0.0;
     if (mahmSensor.readCpuTemperature(&cpuCelsius))
     {
-        cpuInfo.cpuTempC = cpuCelsius;
-        cpuInfo.cpuTempAvailable = true;
-        cpuInfo.cpuTempApproximate = false;
+        cpu.cpuTempC = cpuCelsius;
+        cpu.cpuTempAvailable = true;
+        cpu.cpuTempApproximate = false;
     }
     else if (readThermalZonePdh(&cpuCelsius) || readThermalZoneWmi(&cpuCelsius))
     {
-        cpuInfo.cpuTempC = cpuCelsius;
-        cpuInfo.cpuTempAvailable = true;
-        cpuInfo.cpuTempApproximate = true;
+        cpu.cpuTempC = cpuCelsius;
+        cpu.cpuTempAvailable = true;
+        cpu.cpuTempApproximate = true;
     }
     else if (!cpuTempLogged)
     {
@@ -1042,10 +1406,18 @@ bool resource_usage_bi::updateTemps()
         cpuTempLogged = true;
     }
 
-    return cpuInfo.cpuTempAvailable || gpuInfo.gpuTempAvailable;
+    return cpu.cpuTempAvailable || gpuInfoSample.gpuTempAvailable;
 }
 
 bool resource_usage_bi::updateGpuTime(DWORD pid, double *busyMsOut)
+{
+    EnterCriticalSection(&sampleLock);
+    bool ok = updateGpuTimeInto(pid, busyMsOut, gpuInfo);
+    LeaveCriticalSection(&sampleLock);
+    return ok;
+}
+
+bool resource_usage_bi::updateGpuTimeInto(DWORD pid, double *busyMsOut, GpuInfo &gpu)
 {
     if (busyMsOut)
         *busyMsOut = 0.0;
@@ -1135,8 +1507,8 @@ bool resource_usage_bi::updateGpuTime(DWORD pid, double *busyMsOut)
         if (load > 100.0)
             load = 100.0;
 
-        gpuInfo.gpuLoadValue = load;
-        gpuInfo.gpuLoad = std::format("{:.2f}%", load);
+        gpu.gpuLoadValue = load;
+        gpu.gpuLoad = std::format("{:.2f}%", load);
     }
 
     if (pid == 0)
@@ -1170,14 +1542,20 @@ bool resource_usage_bi::updateGpuTime(DWORD pid, double *busyMsOut)
 
 void resource_usage_bi::cleanup()
 {
-    // Release COM interfaces before dropping the apartment.
-    if (thermalSvc != NULL)
+    EnterCriticalSection(&samplerLifecycleLock);
+    if (cleanupDone)
     {
-        thermalSvc->Release();
-        thermalSvc = NULL;
+        LeaveCriticalSection(&samplerLifecycleLock);
+        return;
     }
+    cleanupDone = true;
 
-    CoUninitialize();
+    // The critical section is recursive, so stopSampler can join the worker
+    // while preventing a concurrent restart between the join and cleanup.
+    stopSampler();
+    LeaveCriticalSection(&samplerLifecycleLock);
+
+    EnterCriticalSection(&sampleLock);
 
     if (sharedQuery != NULL)
     {
@@ -1199,11 +1577,15 @@ void resource_usage_bi::cleanup()
     cpuCoreCounters.clear();
     gpuRunningCounter = NULL;
     powerCounter = NULL;
+    vramCounter = NULL;
     sharedCollected = false;
 
     gpuTimePrev.clear();
     gpuBuffer.clear();
     powerBuffer.clear();
+    vramBuffer.clear();
+
+    LeaveCriticalSection(&sampleLock);
 
     networkInfo.clear();
     disksInfo.clear();

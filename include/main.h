@@ -1,7 +1,6 @@
 #ifndef MAIN_H
 #define MAIN_H
 
-#include <minwindef.h>
 #include <windows.h>
 #include <windowsx.h>
 #include <shellapi.h>
@@ -27,8 +26,15 @@
 class win_bi
 {
 public:
+    enum restart_request_bi
+    {
+        RESTART_NONE = 0,
+        RESTART_UPDATED,
+        RESTART_ROLLED_BACK
+    };
+
     win_bi(HINSTANCE hInstance);
-    ~win_bi() = default;
+    ~win_bi();
 
     bool Register();
     bool Create(int nCmdShow, bool startInTray);
@@ -44,6 +50,12 @@ public:
     WPARAM RunMessageLoop();
 
     std::unique_ptr<resource_usage_bi> ru_bi;
+
+    restart_request_bi restartRequest() const
+    {
+        return restartMode;
+    }
+    HANDLE takeRestartGuard();
 
 private:
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -76,6 +88,7 @@ private:
     void OnHotKey(WPARAM wParam);
 
     void ToggleOverlay();
+    void ToggleCapture();
     void SaveSettings();
     void RunStartupWizard();  // UX-08: guided first-run
     void RunAction(int action);
@@ -106,6 +119,8 @@ private:
     std::unique_ptr<overlay_bi> ov_bi;
     std::unique_ptr<etw_bi> etwTrace;
     std::unique_ptr<update_bi> updater;
+    restart_request_bi restartMode = RESTART_NONE;
+    HANDLE restartGuard = INVALID_HANDLE_VALUE;
 
     settings_bi settings;
 
@@ -118,7 +133,6 @@ private:
 
     DWORD lastFrameDataTick = 0;
     DWORD lastEtwRestartTick = 0;
-    DWORD lastSlowSensorTick = 0;
     bool firstRun_ = false;
 
     unsigned hudTick = 0;

@@ -11,14 +11,21 @@ namespace
     std::map<std::string, std::wstring> g_table;
     std::string g_lang = "en";
 
-    std::wstring utf8ToWide(const std::string &s)
+    bool validLanguageTag(const std::string &tag)
     {
-        if (s.empty())
-            return std::wstring();
-        int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
-        std::wstring w(n, L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], n);
-        return w;
+        if (tag.empty() || tag.size() > 32)
+            return false;
+
+        for (unsigned char c : tag)
+        {
+            bool allowed = (c >= 'a' && c <= 'z') ||
+                           (c >= 'A' && c <= 'Z') ||
+                           (c >= '0' && c <= '9') ||
+                           c == '-' || c == '_';
+            if (!allowed)
+                return false;
+        }
+        return true;
     }
 
     void trim(std::string &s)
@@ -49,9 +56,9 @@ namespace
     }
 
     // <code>.lang next to the exe (portable) first, then the data dir.
-    bool parseFile(const std::string &path)
+    bool parseFile(const std::wstring &path)
     {
-        FILE *f = fopen(path.c_str(), "rb");
+        FILE *f = _wfopen(path.c_str(), L"rb");
         if (!f)
             return false;
 
@@ -70,7 +77,7 @@ namespace
             trim(key);
             trim(val);
             if (!key.empty())
-                g_table[key] = utf8ToWide(unescape(val));
+                g_table[key] = paths_bi::utf8ToWide(unescape(val));
         }
         fclose(f);
         return true;
@@ -82,20 +89,33 @@ void i18n_bi::load(const std::string &lang)
     g_table.clear();
     g_lang = lang.empty() ? "en" : lang;
 
+    if (!validLanguageTag(g_lang))
+    {
+        log_bi::write("i18n: rejected invalid language tag");
+        g_lang = "en";
+    }
+
     if (g_lang == "en")
         return;  // inline fallbacks
 
     std::string file = g_lang + ".lang";
+    std::wstring wideFile = paths_bi::utf8ToWide(file);
+    if (wideFile.empty())
+    {
+        log_bi::write("i18n: language tag is not valid UTF-8");
+        g_lang = "en";
+        return;
+    }
 
     // Next to the exe first.
-    std::string exe = paths_bi::exePath();
-    size_t slash = exe.find_last_of("\\/");
+    std::wstring exe = paths_bi::exePathWide();
+    size_t slash = exe.find_last_of(L"\\/");
     bool loaded = false;
-    if (slash != std::string::npos)
-        loaded = parseFile(exe.substr(0, slash + 1) + file);
+    if (slash != std::wstring::npos)
+        loaded = parseFile(exe.substr(0, slash + 1) + wideFile);
 
     if (!loaded)
-        loaded = parseFile(paths_bi::inDataDir(file.c_str()));
+        loaded = parseFile(paths_bi::inDataDirWide(wideFile.c_str()));
 
     if (loaded)
         log_bi::write("i18n: loaded language '%s' (%u strings)",

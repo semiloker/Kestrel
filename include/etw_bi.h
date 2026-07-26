@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <evntrace.h>
 #include <evntcons.h>
+#include <atomic>
 #include <map>
 #include <string>
 
@@ -22,25 +23,35 @@ public:
 
     etw_bi();
     ~etw_bi();
+    etw_bi(const etw_bi &) = delete;
+    etw_bi &operator=(const etw_bi &) = delete;
 
     bool start() override;
     void stop() override;
 
-    bool running() const override { return sessionActive; }
+    bool running() const override { return sessionActive.load(std::memory_order_acquire); }
     bool elevated() const override { return isElevated; }
-    const char *lastError() const override { return failReason; }
-    bool hasFailed() const override { return failed; }
+    const char *lastError() const override { return failReason.load(std::memory_order_acquire); }
+    bool hasFailed() const override { return failed.load(std::memory_order_acquire); }
 
     void setTarget(DWORD processId) override;
-    DWORD target() const override { return targetPid; }
+    DWORD target() const override { return targetPid.load(std::memory_order_acquire); }
 
     sample_bi sample() override;
+    sample_bi sampleTargetOnly();
 
     size_t drainFrames(frame_sample_bi *out, size_t max) override;
-    unsigned long long framesDropped() const override { return frameLost; }
+    void discardFrames() override;
+    unsigned long long framesDropped() const override
+    {
+        return frameLost.load(std::memory_order_relaxed);
+    }
 
     void setFallbackSource(provider_bi provider, unsigned eventId) override;
-    void setDeepCensus(bool enabled) override { deepCensus = enabled; }
+    void setDeepCensus(bool enabled) override
+    {
+        deepCensus.store(enabled, std::memory_order_release);
+    }
     void autoConfigForApi(api_bi api) override;
 
     static const char *apiName(api_bi a);
@@ -87,42 +98,47 @@ private:
     void countEvent(DWORD pid, int providerIndex, unsigned eventId);
 
     bool evaluateProcess(proc_stats_bi &p, LONGLONG now, sample_bi *out, int *sourceOut);
+    sample_bi sampleInternal(bool targetOnly);
 
     const proc_ident_bi *knownProcess(DWORD pid) const;
     const proc_ident_bi &resolveProcess(DWORD pid);
 
     void dumpCensus(double seconds);
     void pollHealth(LONGLONG now);
+    bool appendSourceLocked(provider_bi provider, unsigned eventId, const char *name);
 
     static DWORD WINAPI traceThread(LPVOID param);
 
     TRACEHANDLE sessionHandle;
-    TRACEHANDLE consumerHandle;
+    std::atomic<TRACEHANDLE> consumerHandle;
     HANDLE thread;
 
-    volatile bool sessionActive;
-    volatile bool failed;
+    std::atomic<bool> sessionActive;
+    std::atomic<bool> failed;
     bool isElevated;
-    bool deepCensus;
-    const char *failReason;
+    std::atomic<bool> deepCensus;
+    std::atomic<const char *> failReason;
 
-    DWORD targetPid;
+    std::atomic<DWORD> targetPid;
     api_bi configuredApi;
 
     source_def_bi sources[ETW_MAX_SOURCES];
-    int sourceCount;
+    // Entries are immutable after publication. Writers initialize an entry
+    // under lock, then release-publish the new count for the ETW callback.
+    std::atomic<int> sourceCount;
 
     DWORD reportedPid;
     int reportedSource;
 
     CRITICAL_SECTION lock;
+    CRITICAL_SECTION lifecycleLock;
 
     std::map<DWORD, proc_stats_bi> procs;
     std::map<DWORD, proc_ident_bi> idents;
 
     std::map<unsigned, unsigned> census;
-    DWORD censusPid;
-    LONGLONG censusStart100ns;
+    std::atomic<DWORD> censusPid;
+    std::atomic<LONGLONG> censusStart100ns;
     LONGLONG lastCensusDump100ns;
     int censusRuns;
 
@@ -133,7 +149,7 @@ private:
     frame_sample_bi frameRing[ETW_FRAME_RING];
     unsigned long long frameWritten;
     unsigned long long frameDrained;
-    unsigned long long frameLost;
+    std::atomic<unsigned long long> frameLost;
     DWORD frameOwnerPid;
 };
 

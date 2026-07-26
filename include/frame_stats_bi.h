@@ -43,7 +43,6 @@ public:
 
 private:
     void rebuildScratch() const;
-    void refreshStutterThreshold();
 
     std::deque<entry_bi> frames;
     size_t capacity;
@@ -51,12 +50,7 @@ private:
     mutable std::vector<float> scratch;
     mutable bool scratchValid;
 
-    std::vector<float> thresholdScratch;
-
     double sumMs;
-    unsigned stutterCount;
-    double stutterThresholdMs;
-    size_t sinceThreshold;
 };
 
 #endif

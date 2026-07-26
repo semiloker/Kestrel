@@ -3,16 +3,83 @@
 #include "app_identity_bi.h"
 
 #include <windows.h>
+#include <cstdint>
 #include <cstdio>
 #include <cstdarg>
+#include <fcntl.h>
 #include <string>
 #include <format>
+#include <io.h>
 
 namespace
 {
     FILE *g_file = nullptr;
     CRITICAL_SECTION g_lock;
     bool g_lockReady = false;
+
+    bool anotherInstanceIsRunning()
+    {
+        HANDLE mutex = OpenMutexW(SYNCHRONIZE | MUTEX_MODIFY_STATE, FALSE,
+                                  APP_MUTEX_NAME_WIDE);
+        if (!mutex)
+            return false;
+
+        DWORD wait = WaitForSingleObject(mutex, 0);
+        bool running = wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED;
+        if (!running)
+            ReleaseMutex(mutex);
+        CloseHandle(mutex);
+        return running;
+    }
+
+    FILE *openRegularLog(const std::wstring &path, bool truncateFirst)
+    {
+        HANDLE handle = CreateFileW(
+            path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+            NULL, OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+        if (handle == INVALID_HANDLE_VALUE)
+            return NULL;
+
+        FILE_ATTRIBUTE_TAG_INFO attributes = {};
+        BY_HANDLE_FILE_INFORMATION information = {};
+        if (!GetFileInformationByHandleEx(
+                handle, FileAttributeTagInfo, &attributes, sizeof(attributes)) ||
+            (attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 ||
+            !GetFileInformationByHandle(handle, &information) ||
+            information.nNumberOfLinks != 1)
+        {
+            CloseHandle(handle);
+            return NULL;
+        }
+
+        LARGE_INTEGER position = {};
+        if (truncateFirst &&
+            (!SetFilePointerEx(handle, position, NULL, FILE_BEGIN) ||
+             !SetEndOfFile(handle)))
+        {
+            CloseHandle(handle);
+            return NULL;
+        }
+        if (!SetFilePointerEx(handle, position, NULL, FILE_END))
+        {
+            CloseHandle(handle);
+            return NULL;
+        }
+
+        int flags = _O_WRONLY | _O_BINARY | _O_APPEND;
+        int fd = _open_osfhandle((intptr_t)handle, flags);
+        if (fd < 0)
+        {
+            CloseHandle(handle);
+            return NULL;
+        }
+
+        FILE *file = _fdopen(fd, "ab");
+        if (!file)
+            _close(fd);
+        return file;
+    }
 
     std::string stamp()
     {
@@ -48,11 +115,13 @@ void log_bi::init()
         g_lockReady = true;
     }
 
-    std::string path = paths_bi::inDataDir(APP_LOG_FILE);
+    std::wstring path = paths_bi::inDataDirWide(APP_LOG_FILE_WIDE);
     if (path.empty())
         return;
 
-    g_file = fopen(path.c_str(), "w");
+    // Helper/CLI and duplicate launches must not erase the active instance's
+    // diagnostics. A genuine new application session still starts a fresh log.
+    g_file = openRegularLog(path, !anotherInstanceIsRunning());
     if (!g_file)
         return;
 

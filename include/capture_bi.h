@@ -10,6 +10,9 @@
 class capture_bi
 {
 public:
+    static constexpr size_t MAX_CAPTURE_FRAMES = 240000;
+    static constexpr size_t MAX_POWER_SAMPLES = 21600;
+
     struct summary_bi
     {
         std::string label;
@@ -52,23 +55,26 @@ public:
 
     bool active() const { return recording; }
 
-    void start(const std::string &processName);
+    void start(const std::string &processName, DWORD processId);
     bool stop(summary_bi *out);
     void discard();
 
-    void addFrame(double intervalMs, LONGLONG time100ns);
-    void addPowerSample(double packageW, bool packageValid,
+    // False when the fixed capture limit has been reached.
+    bool addFrame(double intervalMs, LONGLONG time100ns);
+    // False when the independent one-Hz power-sample limit is reached.
+    bool addPowerSample(double packageW, bool packageValid,
                         double batteryPct, bool batteryPctValid,
                         double batteryRateW, bool batteryRateValid,
                         double fullChargedWh);
 
     double elapsedSeconds() const;
     size_t frameCount() const { return frames.count(); }
+    DWORD targetProcessId() const { return targetPid; }
     double liveAverageFps() const { return frames.averageFps(); }
     double liveLow1Fps() const { return frames.lowFps(0.01); }
     bool liveLow1Valid() const { return frames.hasEnoughFor(0.01); }
 
-    static std::string capturesDir();
+    static std::wstring capturesDir();
     static bool loadIndex(std::vector<summary_bi> *out);
 
 private:
@@ -83,12 +89,14 @@ private:
         bool batteryPctValid;
     };
 
-    bool writeFrameCsv(const std::string &path) const;
+    bool writeFrameCsv(const std::wstring &path, DWORD *errorOut) const;
     bool appendIndex(const summary_bi &s) const;
     void computeSummary(summary_bi *out) const;
 
     bool recording;
     std::string processName;
+    std::string startLabel;
+    DWORD targetPid;
     LONGLONG startTime100ns;
     LONGLONG lastTime100ns;
 

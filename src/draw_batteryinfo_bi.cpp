@@ -1,5 +1,6 @@
 #include "draw_batteryinfo_bi.h"
 #include "app_identity_bi.h"
+#include "paths_bi.h"
 
 #include <cmath>
 #include <cstdio>
@@ -41,6 +42,7 @@ namespace
 
     const int MASTER_TOGGLE_INDEX = -100;
     const float FOOTER_H = 30.0f;
+    const size_t MAX_LAYOUT_CACHE_ENTRIES = 512;
 
     enum metric_color_bi
     {
@@ -97,7 +99,7 @@ namespace
 
     std::wstring widen(const std::string &s)
     {
-        return std::wstring(s.begin(), s.end());
+        return paths_bi::utf8ToWide(s);
     }
 
     std::wstring minutesText(int minutes)
@@ -511,6 +513,8 @@ void draw_batteryinfo_bi::txt(IDWriteTextFormat *f, float l, float t, float r, f
             if (SUCCEEDED(hr) && layout)
             {
                 layout->SetTextAlignment(align);
+                if (layoutCache.size() >= MAX_LAYOUT_CACHE_ENTRIES)
+                    clearLayoutCache();
                 layoutCache[key] = layout;
             }
         }
@@ -1614,6 +1618,7 @@ void draw_batteryinfo_bi::drawPanelText(init_dwrite_bi *dw, const std::string &t
         return;
 
     size_t i = 0;
+    size_t cell = 0;
     while (i < text.size())
     {
         bool isBracket = (text[i] == '[' || text[i] == ']');
@@ -1623,9 +1628,9 @@ void draw_batteryinfo_bi::drawPanelText(init_dwrite_bi *dw, const std::string &t
             ++j;
 
         std::string chunk = text.substr(i, j - i);
-        std::wstring run(chunk.begin(), chunk.end());
+        std::wstring run = widen(chunk);
 
-        float runX = x + (startColumn + (float)i) * advance;
+        float runX = x + (startColumn + (float)cell) * advance;
 
         pBrush->SetColor(isBracket ? bracketColor : color);
 
@@ -1633,6 +1638,7 @@ void draw_batteryinfo_bi::drawPanelText(init_dwrite_bi *dw, const std::string &t
         rt->DrawText(run.c_str(), (UINT32)run.size(), dw->pTextFormatPanel, rect, pBrush,
                      D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
 
+        cell += hud_display_width(chunk);
         i = j;
     }
 }
@@ -1837,8 +1843,8 @@ void draw_batteryinfo_bi::drawOverlayPreview(init_dwrite_bi *dw, overlay_bi *ov,
 
                 std::string lbl = std::format("{} {:.1f} {}",
                                                metric.label, metric.series.current(), metric.unit);
-                std::wstring wlbl(lbl.begin(), lbl.end());
-                float lblW = (float)wlbl.size() * 5.5f;
+                std::wstring wlbl = widen(lbl);
+                float lblW = (float)hud_display_width(lbl) * 5.5f;
                 float lx = right - lblW - 2.0f;
                 float ly = top + 2.0f;
                 if (lx >= left)
@@ -2470,6 +2476,15 @@ void draw_batteryinfo_bi::drawCaptureTab(ID2D1HwndRenderTarget *pRT, init_dwrite
         button(dw, IX, y + 80.0f, 160.0f, L"Stop and save", true,
                isHovered(HIT_ACTION, ACT_TOGGLE_CAPTURE));
     }
+    else if (cap.finalizing)
+    {
+        txt(dw->pTextFormatStrong, IX, y + 32.0f, IR, y + 52.0f, pal.text,
+            L"Saving capture...");
+        txt(dw->pTextFormatSmall, IX, y + 54.0f, IR, y + 72.0f, pal.muted,
+            L"The frame CSV and summary are being written in the background.");
+
+        button(dw, IX, y + 80.0f, 160.0f, L"Please wait", false, false);
+    }
     else
     {
         txt(dw->pTextFormatStrong, IX, y + 32.0f, IR, y + 52.0f, pal.text,
@@ -2481,8 +2496,11 @@ void draw_batteryinfo_bi::drawCaptureTab(ID2D1HwndRenderTarget *pRT, init_dwrite
                isHovered(HIT_ACTION, ACT_TOGGLE_CAPTURE));
     }
 
-    pushHit(D2D1::RectF(IX, y + 80.0f, IX + 160.0f, y + 80.0f + BTN_H),
-            HIT_ACTION, ACT_TOGGLE_CAPTURE, nullptr);
+    if (!cap.finalizing)
+    {
+        pushHit(D2D1::RectF(IX, y + 80.0f, IX + 160.0f, y + 80.0f + BTN_H),
+                HIT_ACTION, ACT_TOGGLE_CAPTURE, nullptr);
+    }
 
     txt(dw->pTextFormatMicro, IX + 172.0f, y + 80.0f, IR, y + 112.0f, pal.faint,
         L"or press Ctrl+Alt+B anywhere");
@@ -3055,7 +3073,7 @@ void draw_batteryinfo_bi::drawAboutTab(ID2D1HwndRenderTarget *pRT, init_dwrite_b
 
     y += updateH + CARD_GAP;
 
-    float diagH = 295.0f;
+    float diagH = 335.0f;
     card(L, y, R, y + diagH);
     eyebrow(dw, IX, y + 16.0f, L"WHAT KESTREL CAN READ ON THIS MACHINE");
 
@@ -3092,6 +3110,11 @@ void draw_batteryinfo_bi::drawAboutTab(ID2D1HwndRenderTarget *pRT, init_dwrite_b
 
     diag_row d4 = {L"Per-core load", wfmt(L"%d threads", diag.threads), diag.threads > 0};
     lines.push_back(d4);
+
+    diag_row d5 = {L"Global hotkeys",
+                    diag.hotkeys ? L"Registered" : widen(diag.hotkeyReason),
+                    diag.hotkeys};
+    lines.push_back(d5);
 
     for (size_t i = 0; i < lines.size(); ++i)
     {

@@ -1,16 +1,27 @@
 #include "capture_bi.h"
 
+#include "csv_bi.h"
 #include "paths_bi.h"
 #include "logger_bi.h"
 
+#include <cerrno>
+#include <charconv>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
+#include <cstdint>
+#include <deque>
+#include <fcntl.h>
 #include <format>
+#include <io.h>
+#include <limits>
 
 namespace
 {
-    const char *INDEX_FILE = "index.csv";
+    const LONGLONG MAX_INDEX_BYTES = 8LL * 1024LL * 1024LL;
+    const size_t MAX_HISTORY_ROWS = 1000;
 
     LONGLONG nowFileTime()
     {
@@ -21,17 +32,31 @@ namespace
 
     std::string sanitize(const std::string &s)
     {
-        std::string out;
-        for (size_t i = 0; i < s.size() && out.size() < 40; ++i)
+        std::wstring input = paths_bi::utf8ToWide(s);
+        std::wstring out;
+        for (size_t i = 0; i < input.size() && out.size() < 40; ++i)
         {
-            char c = s[i];
-            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                (c >= '0' && c <= '9') || c == '-' || c == '_')
+            wchar_t c = input[i];
+            if (c >= 0xd800 && c <= 0xdbff)
             {
+                if (i + 1 >= input.size() || input[i + 1] < 0xdc00 ||
+                    input[i + 1] > 0xdfff || out.size() + 2 > 40)
+                {
+                    continue;
+                }
                 out += c;
+                out += input[++i];
+                continue;
             }
+            if (c >= 0xdc00 && c <= 0xdfff)
+                continue;
+            if (c >= 0x20 && wcschr(L"<>:\"/\\|?*", c) == NULL)
+                out += c;
         }
-        return out.empty() ? std::string("session") : out;
+        while (!out.empty() && (out.back() == L'.' || out.back() == L' '))
+            out.pop_back();
+        std::string utf8 = paths_bi::wideToUtf8(out);
+        return utf8.empty() ? std::string("session") : utf8;
     }
 
     std::string timestampLabel()
@@ -47,70 +72,176 @@ namespace
     {
         SYSTEMTIME st;
         GetLocalTime(&st);
-        return std::format("{:04}{:02}{:02}-{:02}{:02}{:02}",
+        return std::format("{:04}{:02}{:02}-{:02}{:02}{:02}-{:03}",
                            (unsigned)st.wYear, (unsigned)st.wMonth, (unsigned)st.wDay,
-                           (unsigned)st.wHour, (unsigned)st.wMinute, (unsigned)st.wSecond);
+                           (unsigned)st.wHour, (unsigned)st.wMinute, (unsigned)st.wSecond,
+                           (unsigned)st.wMilliseconds);
     }
 
-    std::string csvEscape(const std::string &s)
+    bool parseNumber(const std::string &text, double *value)
     {
-        std::string out;
-        for (size_t i = 0; i < s.size(); ++i)
-        {
-            if (s[i] == ',' || s[i] == '"' || s[i] == '\n')
-                continue;
-            out += s[i];
-        }
-        return out;
-    }
-
-    bool nextField(const std::string &line, size_t *pos, std::string *out)
-    {
-        if (*pos > line.size())
+        if (text.empty())
             return false;
 
-        size_t comma = line.find(',', *pos);
-        if (comma == std::string::npos)
+        errno = 0;
+        char *end = NULL;
+        double parsed = strtod(text.c_str(), &end);
+        if (errno == ERANGE || end != text.c_str() + text.size() ||
+            !std::isfinite(parsed))
         {
-            *out = line.substr(*pos);
-            *pos = line.size() + 1;
-            return true;
+            return false;
         }
-
-        *out = line.substr(*pos, comma - *pos);
-        *pos = comma + 1;
+        *value = parsed;
         return true;
     }
+
+    bool parseCount(const std::string &text, size_t *value)
+    {
+        unsigned long long parsed = 0;
+        std::from_chars_result result =
+            std::from_chars(text.data(), text.data() + text.size(), parsed);
+        if (text.empty() || result.ec != std::errc() ||
+            result.ptr != text.data() + text.size() ||
+            parsed > (std::numeric_limits<size_t>::max)())
+        {
+            return false;
+        }
+        *value = (size_t)parsed;
+        return true;
+    }
+
+    FILE *openRegularAppend(const std::wstring &path, bool *emptyOut)
+    {
+        if (emptyOut)
+            *emptyOut = false;
+
+        HANDLE handle = CreateFileW(
+            path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+        if (handle == INVALID_HANDLE_VALUE)
+            return NULL;
+
+        FILE_ATTRIBUTE_TAG_INFO attributes = {};
+        BY_HANDLE_FILE_INFORMATION information = {};
+        if (GetFileType(handle) != FILE_TYPE_DISK ||
+            !GetFileInformationByHandleEx(
+                handle, FileAttributeTagInfo, &attributes, sizeof(attributes)) ||
+            (attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 ||
+            !GetFileInformationByHandle(handle, &information) ||
+            information.nNumberOfLinks != 1)
+        {
+            CloseHandle(handle);
+            return NULL;
+        }
+
+        if (emptyOut)
+            *emptyOut = information.nFileSizeHigh == 0 &&
+                        information.nFileSizeLow == 0;
+
+        LARGE_INTEGER offset = {};
+        if (!SetFilePointerEx(handle, offset, NULL, FILE_END))
+        {
+            CloseHandle(handle);
+            return NULL;
+        }
+
+        int fd = _open_osfhandle(
+            (intptr_t)handle, _O_WRONLY | _O_BINARY | _O_APPEND);
+        if (fd < 0)
+        {
+            CloseHandle(handle);
+            return NULL;
+        }
+
+        FILE *file = _fdopen(fd, "ab");
+        if (!file)
+            _close(fd);
+        return file;
+    }
+
+    FILE *openRegularRead(const std::wstring &path)
+    {
+        HANDLE handle = CreateFileW(
+            path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT |
+                FILE_FLAG_SEQUENTIAL_SCAN,
+            NULL);
+        if (handle == INVALID_HANDLE_VALUE)
+            return NULL;
+
+        FILE_ATTRIBUTE_TAG_INFO attributes = {};
+        BY_HANDLE_FILE_INFORMATION information = {};
+        LARGE_INTEGER size = {};
+        if (GetFileType(handle) != FILE_TYPE_DISK ||
+            !GetFileInformationByHandleEx(
+                handle, FileAttributeTagInfo, &attributes, sizeof(attributes)) ||
+            (attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 ||
+            !GetFileInformationByHandle(handle, &information) ||
+            information.nNumberOfLinks != 1 ||
+            !GetFileSizeEx(handle, &size) ||
+            size.QuadPart < 0 || size.QuadPart > MAX_INDEX_BYTES)
+        {
+            CloseHandle(handle);
+            return NULL;
+        }
+
+        int fd = _open_osfhandle((intptr_t)handle, _O_RDONLY | _O_BINARY);
+        if (fd < 0)
+        {
+            CloseHandle(handle);
+            return NULL;
+        }
+
+        FILE *file = _fdopen(fd, "rb");
+        if (!file)
+            _close(fd);
+        return file;
+    }
+
 }
 
 capture_bi::capture_bi()
     : recording(false),
+      targetPid(0),
       startTime100ns(0),
       lastTime100ns(0),
       fullChargedWh(0.0)
 {
+    frames.setCapacity(MAX_CAPTURE_FRAMES);
 }
 
-std::string capture_bi::capturesDir()
+std::wstring capture_bi::capturesDir()
 {
-    const std::string &base = paths_bi::dataDir();
+    const std::wstring &base = paths_bi::dataDirWide();
     if (base.empty())
-        return std::string();
+        return std::wstring();
 
-    std::string dir = base + "\\captures";
+    std::wstring dir = base + L"\\captures";
 
-    if (CreateDirectoryA(dir.c_str(), NULL) || GetLastError() == ERROR_ALREADY_EXISTS)
+    if (CreateDirectoryW(dir.c_str(), NULL))
         return dir;
+    if (GetLastError() == ERROR_ALREADY_EXISTS)
+    {
+        DWORD attributes = GetFileAttributesW(dir.c_str());
+        if (attributes != INVALID_FILE_ATTRIBUTES &&
+            (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
+            (attributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0)
+        {
+            return dir;
+        }
+    }
 
-    return std::string();
+    return std::wstring();
 }
 
-void capture_bi::start(const std::string &name)
+void capture_bi::start(const std::string &name, DWORD processId)
 {
     frames.reset();
     power.clear();
 
     processName = name.empty() ? std::string("unknown") : name;
+    startLabel = timestampLabel();
+    targetPid = processId;
     startTime100ns = nowFileTime();
     lastTime100ns = startTime100ns;
     fullChargedWh = 0.0;
@@ -126,25 +257,41 @@ void capture_bi::discard()
     power.clear();
 }
 
-void capture_bi::addFrame(double intervalMs, LONGLONG time100ns)
+bool capture_bi::addFrame(double intervalMs, LONGLONG time100ns)
 {
     if (!recording)
-        return;
+        return true;
+    if (time100ns < startTime100ns)
+        return true;
+    if (frames.count() >= MAX_CAPTURE_FRAMES)
+        return false;
 
+    size_t before = frames.count();
     frames.push(intervalMs, time100ns);
-    lastTime100ns = time100ns;
+    if (frames.count() > before)
+        lastTime100ns = time100ns;
+    return true;
 }
 
-void capture_bi::addPowerSample(double packageW, bool packageOk,
+bool capture_bi::addPowerSample(double packageW, bool packageOk,
                                 double batteryPct, bool batteryPctOk,
                                 double batteryRateW, bool batteryRateOk,
                                 double capacityWh)
 {
     if (!recording)
-        return;
+        return true;
 
     power_sample_bi s;
     s.time100ns = nowFileTime();
+    if (!power.empty())
+    {
+        LONGLONG elapsed = s.time100ns - power.back().time100ns;
+        if (elapsed < 10000000LL)
+            return true;
+    }
+    if (power.size() >= MAX_POWER_SAMPLES)
+        return false;
+
     s.packageW = packageW;
     s.packageValid = packageOk;
     s.batteryPct = batteryPct;
@@ -156,6 +303,7 @@ void capture_bi::addPowerSample(double packageW, bool packageOk,
 
     if (capacityWh > 0.0)
         fullChargedWh = capacityWh;
+    return true;
 }
 
 double capture_bi::elapsedSeconds() const
@@ -170,7 +318,7 @@ double capture_bi::elapsedSeconds() const
 void capture_bi::computeSummary(summary_bi *out) const
 {
     out->process = processName;
-    out->label = timestampLabel();
+    out->label = startLabel;
     out->frames = frames.count();
 
     LONGLONG span = lastTime100ns - startTime100ns;
@@ -202,6 +350,8 @@ void capture_bi::computeSummary(summary_bi *out) const
     for (size_t i = 0; i < power.size(); ++i)
     {
         const power_sample_bi &s = power[i];
+        if (s.time100ns > lastTime100ns)
+            continue;
 
         if (s.packageValid)
         {
@@ -264,11 +414,37 @@ void capture_bi::computeSummary(summary_bi *out) const
     }
 }
 
-bool capture_bi::writeFrameCsv(const std::string &path) const
+bool capture_bi::writeFrameCsv(const std::wstring &path, DWORD *errorOut) const
 {
-    FILE *f = fopen(path.c_str(), "w");
-    if (!f)
+    if (errorOut)
+        *errorOut = ERROR_SUCCESS;
+
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, NULL, CREATE_NEW,
+                              FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        if (errorOut)
+            *errorOut = GetLastError();
         return false;
+    }
+
+    int fd = _open_osfhandle((intptr_t)file, _O_WRONLY | _O_TEXT);
+    if (fd < 0)
+    {
+        CloseHandle(file);
+        if (errorOut)
+            *errorOut = ERROR_OPEN_FAILED;
+        return false;
+    }
+
+    FILE *f = _fdopen(fd, "w");
+    if (!f)
+    {
+        _close(fd);
+        if (errorOut)
+            *errorOut = ERROR_OPEN_FAILED;
+        return false;
+    }
 
     fprintf(f, "frame,time_s,frame_time_ms,fps\n");
 
@@ -306,21 +482,28 @@ bool capture_bi::writeFrameCsv(const std::string &path) const
         fprintf(f, "low_0_1_pct_fps,%.2f\n", frames.lowFps(0.001));
     }
 
-    fclose(f);
-    return true;
+    bool ok = !ferror(f);
+    if (fclose(f) != 0)
+        ok = false;
+    if (!ok)
+    {
+        DeleteFileW(path.c_str());
+        if (errorOut)
+            *errorOut = ERROR_WRITE_FAULT;
+    }
+    return ok;
 }
 
 bool capture_bi::appendIndex(const summary_bi &s) const
 {
-    std::string dir = capturesDir();
+    std::wstring dir = capturesDir();
     if (dir.empty())
         return false;
 
-    std::string path = dir + "\\" + INDEX_FILE;
+    std::wstring path = dir + L"\\index.csv";
 
-    bool fresh = GetFileAttributesA(path.c_str()) == INVALID_FILE_ATTRIBUTES;
-
-    FILE *f = fopen(path.c_str(), "a");
+    bool fresh = false;
+    FILE *f = openRegularAppend(path, &fresh);
     if (!f)
         return false;
 
@@ -332,9 +515,9 @@ bool capture_bi::appendIndex(const summary_bi &s) const
     }
 
     fprintf(f, "%s,%s,%s,%.2f,%u,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%u,%.2f,%.4f,%.1f,%.1f,%.2f,%.2f\n",
-            csvEscape(s.label).c_str(),
-            csvEscape(s.process).c_str(),
-            csvEscape(s.file).c_str(),
+            csv_bi::escape(s.label).c_str(),
+            csv_bi::escape(s.process).c_str(),
+            csv_bi::escape(s.file).c_str(),
             s.seconds,
             (unsigned)s.frames,
             s.avgFps,
@@ -349,8 +532,14 @@ bool capture_bi::appendIndex(const summary_bi &s) const
             s.batteryDrawW,
             s.projectionValid ? s.projectedHours : 0.0);
 
-    fclose(f);
-    return true;
+    bool ok = !ferror(f);
+    if (ok && fflush(f) != 0)
+        ok = false;
+    if (ok && _commit(_fileno(f)) != 0)
+        ok = false;
+    if (fclose(f) != 0)
+        ok = false;
+    return ok;
 }
 
 bool capture_bi::stop(summary_bi *out)
@@ -371,23 +560,47 @@ bool capture_bi::stop(summary_bi *out)
         return false;
     }
 
-    std::string dir = capturesDir();
+    std::wstring dir = capturesDir();
     if (!dir.empty())
     {
-        summary.file = timestampFile() + "-" + sanitize(processName) + ".csv";
+        std::string base = timestampFile() + "-" + sanitize(processName);
+        std::wstring full;
+        DWORD writeError = ERROR_FILE_EXISTS;
 
-        std::string full = dir + "\\" + summary.file;
-
-        if (writeFrameCsv(full))
+        for (unsigned attempt = 0; attempt < 1000; ++attempt)
         {
-            appendIndex(summary);
+            summary.file = base;
+            if (attempt > 0)
+                summary.file += "-" + std::to_string(attempt);
+            summary.file += ".csv";
+            std::wstring wideFile = paths_bi::utf8ToWide(summary.file);
+            if (wideFile.empty())
+            {
+                writeError = ERROR_INVALID_NAME;
+                break;
+            }
+            full = dir + L"\\" + wideFile;
+
+            if (writeFrameCsv(full, &writeError))
+                break;
+            if (writeError != ERROR_FILE_EXISTS &&
+                writeError != ERROR_ALREADY_EXISTS)
+            {
+                break;
+            }
+        }
+
+        if (writeError == ERROR_SUCCESS)
+        {
+            if (!appendIndex(summary))
+                log_bi::write("capture: frame CSV written, but index update failed");
             log_bi::write("capture: wrote %u frames to %s",
                           (unsigned)summary.frames, summary.file.c_str());
         }
         else
         {
             summary.file.clear();
-            log_bi::write("capture: could not write %s", full.c_str());
+            log_bi::write("capture: could not create a unique output file");
         }
     }
 
@@ -407,21 +620,31 @@ bool capture_bi::loadIndex(std::vector<summary_bi> *out)
 
     out->clear();
 
-    std::string dir = capturesDir();
+    std::wstring dir = capturesDir();
     if (dir.empty())
         return false;
 
-    std::string path = dir + "\\" + INDEX_FILE;
+    std::wstring path = dir + L"\\index.csv";
 
-    FILE *f = fopen(path.c_str(), "r");
+    FILE *f = openRegularRead(path);
     if (!f)
         return false;
 
-    char line[1024];
+    char line[4096];
     bool first = true;
+    std::deque<summary_bi> history;
 
     while (fgets(line, sizeof(line), f))
     {
+        if (!strchr(line, '\n') && !feof(f))
+        {
+            int c = 0;
+            while ((c = fgetc(f)) != EOF && c != '\n')
+            {
+            }
+            continue;
+        }
+
         std::string text(line);
 
         while (!text.empty() && (text[text.size() - 1] == '\n' || text[text.size() - 1] == '\r'))
@@ -437,80 +660,65 @@ bool capture_bi::loadIndex(std::vector<summary_bi> *out)
                 continue;
         }
 
-        summary_bi s;
+        std::string fields[18];
         size_t pos = 0;
-        std::string field;
+        bool valid = true;
+        for (std::string &field : fields)
+        {
+            if (!csv_bi::nextField(text, &pos, &field))
+            {
+                valid = false;
+                break;
+            }
+        }
+        if (!valid || pos <= text.size())
+            continue;
 
-        if (!nextField(text, &pos, &s.label))
-            continue;
-        if (!nextField(text, &pos, &s.process))
-            continue;
-        if (!nextField(text, &pos, &s.file))
-            continue;
+        summary_bi s;
+        s.label = fields[0];
+        s.process = fields[1];
+        s.file = fields[2];
 
-        if (nextField(text, &pos, &field))
-            s.seconds = atof(field.c_str());
-        if (nextField(text, &pos, &field))
-            s.frames = (size_t)atoi(field.c_str());
-        if (nextField(text, &pos, &field))
-            s.avgFps = atof(field.c_str());
-        if (nextField(text, &pos, &field))
+        size_t stutterCount = 0;
+        if (!parseNumber(fields[3], &s.seconds) ||
+            !parseCount(fields[4], &s.frames) ||
+            !parseNumber(fields[5], &s.avgFps) ||
+            !parseNumber(fields[6], &s.low1Fps) ||
+            !parseNumber(fields[7], &s.low01Fps) ||
+            !parseNumber(fields[8], &s.medianMs) ||
+            !parseNumber(fields[9], &s.minMs) ||
+            !parseNumber(fields[10], &s.maxMs) ||
+            !parseCount(fields[11], &stutterCount) ||
+            stutterCount > (std::numeric_limits<unsigned>::max)() ||
+            !parseNumber(fields[12], &s.avgPackageW) ||
+            !parseNumber(fields[13], &s.energyWh) ||
+            !parseNumber(fields[14], &s.batteryStartPct) ||
+            !parseNumber(fields[15], &s.batteryEndPct) ||
+            !parseNumber(fields[16], &s.batteryDrawW) ||
+            !parseNumber(fields[17], &s.projectedHours))
         {
-            s.low1Fps = atof(field.c_str());
-            s.low1Valid = s.low1Fps > 0.0;
-        }
-        if (nextField(text, &pos, &field))
-        {
-            s.low01Fps = atof(field.c_str());
-            s.low01Valid = s.low01Fps > 0.0;
-        }
-        if (nextField(text, &pos, &field))
-            s.medianMs = atof(field.c_str());
-        if (nextField(text, &pos, &field))
-            s.minMs = atof(field.c_str());
-        if (nextField(text, &pos, &field))
-            s.maxMs = atof(field.c_str());
-        if (nextField(text, &pos, &field))
-            s.stutters = (unsigned)atoi(field.c_str());
-        if (nextField(text, &pos, &field))
-        {
-            s.avgPackageW = atof(field.c_str());
-            s.packageValid = s.avgPackageW > 0.0;
-        }
-        if (nextField(text, &pos, &field))
-        {
-            s.energyWh = atof(field.c_str());
-            s.energyValid = s.energyWh > 0.0;
-        }
-        if (nextField(text, &pos, &field))
-            s.batteryStartPct = atof(field.c_str());
-        if (nextField(text, &pos, &field))
-        {
-            s.batteryEndPct = atof(field.c_str());
-            s.batteryValid = s.batteryStartPct > 0.0 || s.batteryEndPct > 0.0;
-        }
-        if (nextField(text, &pos, &field))
-            s.batteryDrawW = atof(field.c_str());
-        if (nextField(text, &pos, &field))
-        {
-            s.projectedHours = atof(field.c_str());
-            s.projectionValid = s.projectedHours > 0.0;
+            continue;
         }
 
-        out->push_back(s);
+        s.stutters = (unsigned)stutterCount;
+        s.low1Valid = s.low1Fps > 0.0;
+        s.low01Valid = s.low01Fps > 0.0;
+        s.packageValid = s.avgPackageW > 0.0;
+        s.energyValid = s.energyWh > 0.0;
+        s.batteryValid = s.batteryStartPct > 0.0 || s.batteryEndPct > 0.0;
+        s.projectionValid = s.projectedHours > 0.0;
+
+        history.push_back(s);
+        if (history.size() > MAX_HISTORY_ROWS)
+            history.pop_front();
     }
 
     fclose(f);
 
-    if (out->size() > 1)
-    {
-        for (size_t i = 0; i < out->size() / 2; ++i)
-        {
-            summary_bi tmp = (*out)[i];
-            (*out)[i] = (*out)[out->size() - 1 - i];
-            (*out)[out->size() - 1 - i] = tmp;
-        }
-    }
+    out->reserve(history.size());
+    for (std::deque<summary_bi>::const_reverse_iterator it = history.rbegin();
+         it != history.rend(); ++it)
+        out->push_back(*it);
 
     return true;
 }

@@ -11,6 +11,7 @@
 #include <commctrl.h>
 #include <cstring>
 #include <cmath>
+#include <cwchar>
 #include <format>
 
 const char win_bi::szClassName[] = APP_WINDOW_CLASS;
@@ -18,8 +19,293 @@ const char win_bi::szClassName[] = APP_WINDOW_CLASS;
 #define WINDOW_DIP_W 550
 #define WINDOW_DIP_H 750
 
+namespace
+{
+    bool commandLineHasFlag(const wchar_t *flag)
+    {
+        int argc = 0;
+        LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+        if (!argv)
+            return false;
+
+        bool found = false;
+        for (int i = 1; i < argc; ++i)
+        {
+            if (wcscmp(argv[i], flag) == 0)
+            {
+                found = true;
+                break;
+            }
+        }
+        LocalFree(argv);
+        return found;
+    }
+
+    bool primaryInstanceIsRunning()
+    {
+        HANDLE mutex = OpenMutexW(SYNCHRONIZE | MUTEX_MODIFY_STATE, FALSE,
+                                  APP_MUTEX_NAME_WIDE);
+        if (!mutex)
+            return false;
+
+        DWORD wait = WaitForSingleObject(mutex, 0);
+        bool running = wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED;
+        if (wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED)
+            ReleaseMutex(mutex);
+        CloseHandle(mutex);
+        return running;
+    }
+
+    bool waitForRestartParent(int *exitCode)
+    {
+        int argc = 0;
+        LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+        if (!argv)
+        {
+            log_bi::writeErr(GetLastError(), "restart: cannot parse command line");
+            *exitCode = 2;
+            return false;
+        }
+
+        DWORD parentPid = 0;
+        bool found = false;
+        bool valid = true;
+
+        for (int i = 1; i < argc; ++i)
+        {
+            if (wcscmp(argv[i], APP_RESTART_WAIT_ARG_WIDE) != 0)
+                continue;
+
+            if (found || i + 1 >= argc || !argv[i + 1][0])
+            {
+                valid = false;
+                break;
+            }
+
+            unsigned long long parsed = 0;
+            const wchar_t *value = argv[++i];
+            for (const wchar_t *p = value; *p; ++p)
+            {
+                if (*p < L'0' || *p > L'9')
+                {
+                    valid = false;
+                    break;
+                }
+                parsed = parsed * 10 + static_cast<unsigned long long>(*p - L'0');
+                if (parsed > MAXDWORD)
+                {
+                    valid = false;
+                    break;
+                }
+            }
+
+            if (!valid || parsed == 0)
+                break;
+
+            parentPid = static_cast<DWORD>(parsed);
+            found = true;
+        }
+
+        LocalFree(argv);
+
+        if (!valid)
+        {
+            log_bi::write("restart: invalid --wait-for-pid argument");
+            *exitCode = 2;
+            return false;
+        }
+        if (!found)
+            return true;
+
+        HANDLE parent = OpenProcess(SYNCHRONIZE, FALSE, parentPid);
+        if (!parent)
+        {
+            DWORD error = GetLastError();
+            if (error == ERROR_INVALID_PARAMETER)
+                return true;  // The previous process already exited.
+
+            log_bi::writeErr(error, "restart: cannot open previous process");
+            *exitCode = 3;
+            return false;
+        }
+
+        log_bi::write("restart: waiting for process %lu to exit",
+                      static_cast<unsigned long>(parentPid));
+        DWORD wait = WaitForSingleObject(parent, 60000);
+        CloseHandle(parent);
+
+        if (wait != WAIT_OBJECT_0)
+        {
+            if (wait == WAIT_FAILED)
+                log_bi::writeErr(GetLastError(), "restart: wait failed");
+            else
+                log_bi::write("restart: previous process did not exit in time");
+            *exitCode = 3;
+            return false;
+        }
+
+        return true;
+    }
+
+    bool handleSettingsCommandLine(int *exitCode)
+    {
+        int argc = 0;
+        LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+        if (!argv)
+            return false;
+
+        bool handled = false;
+        int result = 0;
+
+        for (int i = 1; i < argc; ++i)
+        {
+            bool exporting = wcscmp(argv[i], L"--export-settings") == 0;
+            bool importing = wcscmp(argv[i], L"--import-settings") == 0;
+            if (!exporting && !importing)
+                continue;
+
+            handled = true;
+            if (i + 1 >= argc || !argv[i + 1][0])
+            {
+                log_bi::write("settings: command requires a file path");
+                result = 2;
+                break;
+            }
+
+            if (importing && primaryInstanceIsRunning())
+            {
+                log_bi::write(
+                    "settings: close the running Kestrel instance before importing");
+                result = 3;
+                break;
+            }
+
+            settings_bi settings;
+            bool ok = false;
+
+            if (exporting)
+            {
+                if (auto load = settings.load(); !load.ok())
+                {
+                    log_bi::write("settings: %s", load.error().c_str());
+                }
+                else
+                {
+                    ok = settings.exportJson(argv[i + 1]);
+                }
+            }
+            else
+            {
+                ok = settings.importJson(argv[i + 1]);
+                if (ok)
+                {
+                    auto save = settings.save();
+                    ok = save.ok();
+                    if (!ok)
+                        log_bi::write("settings: %s", save.error().c_str());
+                }
+            }
+
+            log_bi::write("settings %s: %s",
+                          exporting ? "export" : "import",
+                          ok ? "OK" : "FAILED");
+            result = ok ? 0 : 1;
+            break;
+        }
+
+        LocalFree(argv);
+        if (handled)
+            *exitCode = result;
+        return handled;
+    }
+
+    bool launchReplacement(const std::wstring &exe)
+    {
+        if (exe.empty())
+            return false;
+
+        std::wstring commandLine = L"\"" + exe + L"\"";
+        std::vector<wchar_t> mutableCommand(commandLine.begin(), commandLine.end());
+        mutableCommand.push_back(L'\0');
+
+        STARTUPINFOW startup = {};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION process = {};
+        BOOL created = CreateProcessW(
+            exe.c_str(), mutableCommand.data(), NULL, NULL, FALSE, 0,
+            NULL, NULL, &startup, &process);
+        if (!created)
+            return false;
+
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+        return true;
+    }
+
+    bool restoreAfterLaunchFailure(win_bi::restart_request_bi request,
+                                   const std::wstring &exe)
+    {
+        std::wstring staged = update_bi::stagedPath();
+        std::wstring backup = update_bi::backupPath();
+        if (exe.empty() || staged.empty() || backup.empty())
+            return false;
+
+        if (request == win_bi::RESTART_UPDATED)
+        {
+            if (!MoveFileExW(exe.c_str(), staged.c_str(),
+                             MOVEFILE_REPLACE_EXISTING))
+            {
+                return false;
+            }
+            if (!MoveFileExW(backup.c_str(), exe.c_str(),
+                             MOVEFILE_REPLACE_EXISTING))
+            {
+                MoveFileExW(staged.c_str(), exe.c_str(),
+                            MOVEFILE_REPLACE_EXISTING);
+                return false;
+            }
+            return true;
+        }
+
+        if (request == win_bi::RESTART_ROLLED_BACK)
+        {
+            if (!MoveFileExW(exe.c_str(), backup.c_str(),
+                             MOVEFILE_REPLACE_EXISTING))
+            {
+                return false;
+            }
+            if (!MoveFileExW(staged.c_str(), exe.c_str(),
+                             MOVEFILE_REPLACE_EXISTING))
+            {
+                MoveFileExW(backup.c_str(), exe.c_str(),
+                            MOVEFILE_REPLACE_EXISTING);
+                return false;
+            }
+            return true;
+        }
+
+        return false;
+    }
+}
+
 win_bi::win_bi(HINSTANCE hInstance) : hInstance(hInstance), hwnd(NULL)
 {
+}
+
+win_bi::~win_bi()
+{
+    if (restartGuard != INVALID_HANDLE_VALUE)
+    {
+        CloseHandle(restartGuard);
+        restartGuard = INVALID_HANDLE_VALUE;
+    }
+}
+
+HANDLE win_bi::takeRestartGuard()
+{
+    HANDLE guard = restartGuard;
+    restartGuard = INVALID_HANDLE_VALUE;
+    return guard;
 }
 
 bool win_bi::Register()
@@ -60,7 +346,6 @@ bool win_bi::Create(int nCmdShow, bool startInTray)
     initd2d1_bi.reset(new init_d2d1_bi());
     initdwrite_bi.reset(new init_dwrite_bi());
     draw_bibi_bi.reset(new draw_batteryinfo_bi());
-    draw_bibi_bi->setDWriteFactory(initdwrite_bi->pDWriteFactory);
     ru_bi.reset(new resource_usage_bi());
     ov_bi.reset(new overlay_bi());
 
@@ -68,20 +353,15 @@ bool win_bi::Create(int nCmdShow, bool startInTray)
     ov_bi->hud.initStaticInfo(ru_bi->gpuInfo.gpuName);
 
     // First run == no settings file yet (load() does not create one).
-    std::string settingsPath = paths_bi::inDataDir("settings.ini");
+    std::wstring settingsPath = paths_bi::inDataDirWide(L"settings.ini");
     firstRun_ = !settingsPath.empty() &&
-                GetFileAttributesA(settingsPath.c_str()) == INVALID_FILE_ATTRIBUTES;
+                GetFileAttributesW(settingsPath.c_str()) == INVALID_FILE_ATTRIBUTES;
 
     if (auto r = settings.load(); !r.ok())
         log_bi::write("settings: %s", r.error().c_str());
     settings.applyTo(ru_bi.get(), ov_bi.get(), draw_bibi_bi.get(), bi_bi.get());
 
     i18n_bi::load(settings.getString("ui.language", "en"));
-
-    // Probe temperature sensors once so the temp toggles reflect real
-    // availability. Without this the toggle is un-clickable (availability is
-    // only set while temps are shown, which needs the toggle already on).
-    ru_bi->updateTemps();
 
     updater.reset(new update_bi());
 
@@ -302,6 +582,7 @@ void win_bi::OnPaint(HWND hwnd)
 
         draw_bibi_bi->initBrush(pRenderTarget);
         initdwrite_bi->InitGraph();
+        draw_bibi_bi->setDWriteFactory(initdwrite_bi->pDWriteFactory);
         draw_bibi_bi->clearBackground(pRenderTarget);
 
         if (draw_bibi_bi->selectedTab == draw_batteryinfo_bi::BATTERY_INFO)
@@ -408,11 +689,7 @@ void win_bi::OnHotKey(WPARAM wParam)
         break;
 
     case HotkeyManager::ACTION_CAPTURE:
-        captureMgr.toggle(etw_bi::processName(hudTargetPid));
-        draw_bibi_bi->setTab(draw_batteryinfo_bi::CAPTURE);
-        if (ov_bi && ov_bi->show_on_screen_display)
-            UpdateOverlayHud();
-        InvalidateRect(hwnd, NULL, TRUE);
+        ToggleCapture();
         break;
 
     default:
@@ -437,6 +714,43 @@ void win_bi::ToggleOverlay()
         ov_bi->DestroyOverlayWindow();
     }
 
+    InvalidateRect(hwnd, NULL, TRUE);
+}
+
+void win_bi::ToggleCapture()
+{
+    if (captureMgr.finalizing())
+        return;
+
+    bool stopping = captureMgr.active();
+    if (stopping)
+    {
+        collectFrames();
+    }
+    else
+    {
+        if (hudTargetPid == 0 || !etwTrace || !etwTrace->running())
+        {
+            MessageBoxW(
+                hwnd,
+                L"No measurable foreground process is available. Focus the "
+                L"application you want to capture and make sure frame tracing "
+                L"is running.",
+                L"Kestrel", MB_ICONINFORMATION | MB_OK);
+            return;
+        }
+
+        etwTrace->setTarget(hudTargetPid);
+        etwTrace->discardFrames();
+        frameStats.reset();
+        lastFrameDataTick = 0;
+    }
+
+    if (!stopping || captureMgr.active())
+        captureMgr.toggle(etw_bi::processName(hudTargetPid), hudTargetPid);
+    draw_bibi_bi->setTab(draw_batteryinfo_bi::CAPTURE);
+    if (ov_bi && ov_bi->show_on_screen_display)
+        UpdateOverlayHud();
     InvalidateRect(hwnd, NULL, TRUE);
 }
 
@@ -572,6 +886,7 @@ void win_bi::collectFrames()
         frameScratch.resize(4096);
 
     size_t taken = 0;
+    bool captureLimitReached = false;
 
     do
     {
@@ -580,9 +895,20 @@ void win_bi::collectFrames()
         for (size_t i = 0; i < taken; ++i)
         {
             frameStats.push(frameScratch[i].intervalMs, frameScratch[i].time100ns);
-            captureMgr.getCapture().addFrame(frameScratch[i].intervalMs, frameScratch[i].time100ns);
+            if (!captureMgr.getCapture().addFrame(
+                    frameScratch[i].intervalMs, frameScratch[i].time100ns))
+            {
+                captureLimitReached = true;
+            }
         }
     } while (taken == frameScratch.size());
+
+    if (captureLimitReached)
+    {
+        log_bi::write("capture: stopped at the %u-frame safety limit",
+                      (unsigned)capture_bi::MAX_CAPTURE_FRAMES);
+        captureMgr.stopActive();
+    }
 
     FILETIME ft;
     GetSystemTimeAsFileTime(&ft);
@@ -650,22 +976,31 @@ void win_bi::UpdateDerivedMetrics()
 
     if (captureMgr.getCapture().active())
     {
-        captureMgr.getCapture().addPowerSample(snapCpu.packagePowerW,
-                               snapCpu.packagePowerAvailable,
-                               bi_bi->info_1s.chargePercent,
-                               bi_bi->present && bi_bi->info_1s.chargeValid,
-                               bi_bi->info_1s.rateW,
-                               bi_bi->present && bi_bi->info_1s.rateValid,
-                               bi_bi->info_static.capacityValid
-                                   ? bi_bi->info_static.fullChargedWh
-                                   : 0.0);
+        bool powerAccepted =
+            captureMgr.getCapture().addPowerSample(
+                snapCpu.packagePowerW,
+                snapCpu.packagePowerAvailable,
+                bi_bi->info_1s.chargePercent,
+                bi_bi->present && bi_bi->info_1s.chargeValid,
+                bi_bi->info_1s.rateW,
+                bi_bi->present && bi_bi->info_1s.rateValid,
+                bi_bi->info_static.capacityValid
+                    ? bi_bi->info_static.fullChargedWh
+                    : 0.0);
+        if (!powerAccepted)
+        {
+            log_bi::write("capture: stopped at the six-hour safety limit");
+            captureMgr.stopActive();
+        }
     }
 }
 draw_batteryinfo_bi::capture_view_bi win_bi::BuildCaptureView()
 {
     draw_batteryinfo_bi::capture_view_bi view;
 
+    captureMgr.pollFinalize();
     view.recording = captureMgr.getCapture().active();
+    view.finalizing = captureMgr.finalizing();
     view.seconds = captureMgr.getCapture().elapsedSeconds();
     view.frames = captureMgr.getCapture().frameCount();
     view.liveFps = captureMgr.getCapture().liveAverageFps();
@@ -696,21 +1031,28 @@ void win_bi::UpdateOverlayHud()
     if (foreground)
         GetWindowThreadProcessId(foreground, &fgPid);
 
-    if (fgPid != 0 && fgPid != GetCurrentProcessId())
+    // A capture represents one process and one presentation profile. Keep the
+    // HUD target, monitor, and profile pinned until that capture is finalized.
+    if (!captureMgr.active() &&
+        fgPid != 0 && fgPid != GetCurrentProcessId())
     {
         hudTargetPid = fgPid;
         ov_bi->hud.updateForeground(foreground);
+        ov_bi->setTargetWindow(foreground);
     }
 
     if (hudTargetPid != lastProfilePid)
     {
         lastProfilePid = hudTargetPid;
+        frameStats.reset();
+        lastFrameDataTick = 0;
+        if (etwTrace)
+            etwTrace->discardFrames();
 
         std::string exe = etw_bi::processName(hudTargetPid);
         if (exe == "?" || exe == "<access denied>" || exe == "<unknown>")
             exe.clear();
 
-        SaveSettings();
         settings.setProfile(exe);
         settings.applyTo(ru_bi.get(), ov_bi.get(), draw_bibi_bi.get(), bi_bi.get());
         currentProfileExe = exe;
@@ -732,13 +1074,25 @@ void win_bi::UpdateOverlayHud()
                 log_bi::write("etw: auto-restarted successfully");
         }
 
-        etwTrace->setTarget(hudTargetPid);
+        DWORD etwTargetPid = captureMgr.active()
+            ? captureMgr.getCapture().targetProcessId()
+            : hudTargetPid;
+        etwTrace->setTarget(etwTargetPid);
 
         if (etwTrace->running())
-            s = etwTrace->sample();
+        {
+            s = captureMgr.active()
+                    ? etwTrace->sampleTargetOnly()
+                    : etwTrace->sample();
+        }
     }
 
-    DWORD measuredPid = (s.valid && s.pid != 0) ? s.pid : hudTargetPid;
+    DWORD fallbackPid = captureMgr.active()
+        ? captureMgr.getCapture().targetProcessId()
+        : hudTargetPid;
+    DWORD measuredPid = fallbackPid;
+    if (!captureMgr.active() && s.valid && s.pid != 0)
+        measuredPid = s.pid;
 
     if (etwTrace)
     {
@@ -843,23 +1197,6 @@ void win_bi::UpdateOverlayHud()
     ov_bi->hud.showCpuArch = ru_bi->cpuInfo.show_architecture;
     ov_bi->hud.cpuName = snapCpu.cpuName;
     ov_bi->hud.cpuArch = snapCpu.architecture;
-
-    // Slow sensors (network/disk/temps): their collectors were never invoked
-    // anywhere, so these "done" rows always showed empty. Wire them here on a
-    // ~1s cadence, gated by their own toggles. Main thread is COM MTA (see
-    // BatteryInfo.cpp), so updateTemps' CoInitializeEx returns S_FALSE and
-    // stays balanced. ponytail: 1s cadence, cache the WMI connection if temps
-    // ever show up in a profiler.
-    if ((GetTickCount() - lastSlowSensorTick) > 1000)
-    {
-        lastSlowSensorTick = GetTickCount();
-        if (ov_bi->hud.showNetwork)
-            ru_bi->updateNetwork();
-        if (ov_bi->hud.showDisk)
-            ru_bi->updateDisk();
-        if (ru_bi->cpuInfo.show_cpuTemp || ru_bi->gpuInfo.show_gpuTemp)
-            ru_bi->updateTemps();
-    }
 
     // showNetwork/showDisk come from settings (hud.network / hud.disk); do NOT
     // rebind them to unrelated CPU/RAM toggles.
@@ -1183,25 +1520,21 @@ void win_bi::RunAction(int action)
 
     case draw_batteryinfo_bi::ACT_OPEN_LOG:
     {
-        std::string path = paths_bi::inDataDir(APP_LOG_FILE);
+        std::wstring path = paths_bi::inDataDirWide(APP_LOG_FILE_WIDE);
         if (!path.empty())
-            ShellExecuteA(hwnd, "open", path.c_str(), NULL, NULL, SW_SHOWNORMAL);
+            ShellExecuteW(hwnd, L"open", path.c_str(), NULL, NULL, SW_SHOWNORMAL);
         break;
     }
 
     case draw_batteryinfo_bi::ACT_TOGGLE_CAPTURE:
-        captureMgr.toggle(etw_bi::processName(hudTargetPid));
-        draw_bibi_bi->setTab(draw_batteryinfo_bi::CAPTURE);
-        if (ov_bi && ov_bi->show_on_screen_display)
-            UpdateOverlayHud();
-        InvalidateRect(hwnd, NULL, TRUE);
+        ToggleCapture();
         break;
 
     case draw_batteryinfo_bi::ACT_OPEN_CAPTURES:
     {
-        std::string dir = capture_bi::capturesDir();
+        std::wstring dir = capture_bi::capturesDir();
         if (!dir.empty())
-            ShellExecuteA(hwnd, "open", dir.c_str(), NULL, NULL, SW_SHOWNORMAL);
+            ShellExecuteW(hwnd, L"open", dir.c_str(), NULL, NULL, SW_SHOWNORMAL);
         break;
     }
 
@@ -1216,16 +1549,21 @@ void win_bi::RunAction(int action)
     case draw_batteryinfo_bi::ACT_INSTALL_UPDATE:
         SaveSettings();
 
-        if (updater->applyAndRestart())
+        if (restartMode != RESTART_NONE)
+            break;
+
+        if (updater->apply(&restartGuard))
         {
+            restartMode = RESTART_UPDATED;
             DestroyWindow(hwnd);
         }
         else
         {
             MessageBoxA(hwnd,
                         "Could not install the update.\n"
-                        "Kestrel could not replace its own file. If it lives in a\n"
-                        "protected folder, move it somewhere writable and try again.",
+                        "If Kestrel is elevated, move it to an administrator-protected\n"
+                        "folder such as Program Files. Otherwise, make sure its current\n"
+                        "folder is writable and try again.",
                         APP_NAME, MB_ICONWARNING | MB_OK);
         }
         break;
@@ -1246,8 +1584,12 @@ void win_bi::RunAction(int action)
     case draw_batteryinfo_bi::ACT_ROLLBACK:
         SaveSettings();
 
-        if (updater->rollback())
+        if (restartMode != RESTART_NONE)
+            break;
+
+        if (updater->rollback(&restartGuard))
         {
+            restartMode = RESTART_ROLLED_BACK;
             DestroyWindow(hwnd);
         }
         else
@@ -1291,7 +1633,7 @@ draw_batteryinfo_bi::diag_bi win_bi::BuildDiagnostics()
     if (ru_bi)
     {
         diag.cpuPower = snapCpu.packagePowerAvailable;
-        diag.gpuName = ru_bi->gpuInfo.gpuName;
+        diag.gpuName = snapGpu.gpuName;
         diag.threads = (int)snapCpu.CoreUsagePercents.size();
     }
 
@@ -1300,6 +1642,10 @@ draw_batteryinfo_bi::diag_bi win_bi::BuildDiagnostics()
         diag.battery = bi_bi->present;
         diag.chemistry = bi_bi->info_static.Chemistry;
     }
+
+    diag.hotkeys = hotkeys.allRegistered();
+    if (!diag.hotkeys)
+        diag.hotkeyReason = hotkeys.conflictSummary();
 
     return diag;
 }
@@ -1361,10 +1707,17 @@ void win_bi::OnTimer(WPARAM wParam)
                     RECT wr;
                     if (GetWindowRect(fg, &wr))
                     {
-                        int sw = GetSystemMetrics(SM_CXSCREEN);
-                        int sh = GetSystemMetrics(SM_CYSCREEN);
-                        gameRunning = (wr.right - wr.left) >= sw &&
-                                      (wr.bottom - wr.top) >= sh;
+                        HMONITOR monitor =
+                            MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST);
+                        MONITORINFO mi = {};
+                        mi.cbSize = sizeof(mi);
+                        if (monitor && GetMonitorInfoW(monitor, &mi))
+                        {
+                            int monitorW = mi.rcMonitor.right - mi.rcMonitor.left;
+                            int monitorH = mi.rcMonitor.bottom - mi.rcMonitor.top;
+                            gameRunning = (wr.right - wr.left) >= monitorW &&
+                                          (wr.bottom - wr.top) >= monitorH;
+                        }
                     }
                 }
 
@@ -1570,6 +1923,13 @@ void win_bi::OnDestroy()
     hotkeys.unregisterAll(hwnd);
     RemoveTrayIcon();
 
+    if (captureMgr.active())
+    {
+        collectFrames();
+        captureMgr.stopActive();
+    }
+    captureMgr.waitForFinalize();
+
     SaveSettings();
 
     if (updater)
@@ -1607,70 +1967,27 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     log_bi::init();
 
     int exitCode = 0;
+    if (!waitForRestartParent(&exitCode))
+    {
+        log_bi::shutdown();
+        return exitCode;
+    }
+
     if (autostart_bi::handleCommandLine(lpCmdLine, &exitCode))
     {
         log_bi::shutdown();
         return exitCode;
     }
 
-    // Handle --export-settings <path> and --import-settings <path>
-    if (lpCmdLine)
+    if (handleSettingsCommandLine(&exitCode))
     {
-        std::string cmd(lpCmdLine);
-        size_t expPos = cmd.find("--export-settings ");
-        size_t impPos = cmd.find("--import-settings ");
-
-        if (expPos != std::string::npos)
-        {
-            std::string path = cmd.substr(expPos + 18);
-            size_t sp = path.find_first_not_of(" \t");
-            if (sp != std::string::npos)
-                path = path.substr(sp);
-            size_t ep = path.find_first_of(" \t\"");
-            if (ep != std::string::npos)
-                path = path.substr(0, ep);
-
-            settings_bi s;
-            if (auto r = s.load(); !r.ok())
-            {
-                log_bi::write("settings: %s", r.error().c_str());
-                log_bi::shutdown();
-                return 1;
-            }
-            bool ok = s.exportJson(path.c_str());
-            log_bi::write("settings export to %s: %s", path.c_str(), ok ? "OK" : "FAILED");
-            log_bi::shutdown();
-            return ok ? 0 : 1;
-        }
-
-        if (impPos != std::string::npos)
-        {
-            std::string path = cmd.substr(impPos + 18);
-            size_t sp = path.find_first_not_of(" \t");
-            if (sp != std::string::npos)
-                path = path.substr(sp);
-            size_t ep = path.find_first_of(" \t\"");
-            if (ep != std::string::npos)
-                path = path.substr(0, ep);
-
-            settings_bi s;
-            bool ok = s.importJson(path.c_str());
-            if (ok)
-            {
-                auto r = s.save();
-                ok = r.ok();
-                if (!ok)
-                    log_bi::write("settings: %s", r.error().c_str());
-            }
-            log_bi::write("settings import from %s: %s", path.c_str(), ok ? "OK" : "FAILED");
-            log_bi::shutdown();
-            return ok ? 0 : 1;
-        }
+        log_bi::shutdown();
+        return exitCode;
     }
 
-    bool fromTask = lpCmdLine && strstr(lpCmdLine, autostart_bi::ARG_FROM_TASK) != NULL;
+    bool fromTask = commandLineHasFlag(L"--from-task");
     bool autostarted = fromTask ||
-                       (lpCmdLine && strstr(lpCmdLine, autostart_bi::ARG_AUTOSTART) != NULL);
+                       commandLineHasFlag(L"--autostart");
 
     if (!fromTask && !autostart_bi::isElevated() && autostart_bi::taskPointsToThisExe())
     {
@@ -1683,7 +2000,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         log_bi::write("relaunch failed, continuing without elevation");
     }
 
-    HANDLE instanceMutex = CreateMutexA(NULL, TRUE, APP_MUTEX_NAME);
+    HANDLE instanceMutex = CreateMutexW(NULL, TRUE, APP_MUTEX_NAME_WIDE);
     if (instanceMutex && GetLastError() == ERROR_ALREADY_EXISTS)
     {
         HWND existing = FindWindowA(APP_WINDOW_CLASS, NULL);
@@ -1692,32 +2009,66 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             log_bi::write("another instance is already running, focusing it");
             ShowWindow(existing, SW_RESTORE);
             SetForegroundWindow(existing);
+        }
+
+        // Releases before 1.4.2 started the replacement before the old process
+        // released this mutex. Keep that one-time upgrade path working.
+        DWORD waitResult = WaitForSingleObject(instanceMutex, 15000);
+        if (waitResult != WAIT_ABANDONED && waitResult != WAIT_OBJECT_0)
+        {
+            log_bi::write("another instance is still running; exiting");
             CloseHandle(instanceMutex);
             log_bi::shutdown();
             return 0;
         }
-        log_bi::write("orphaned mutex from crashed instance, taking over");
-        DWORD waitResult = WaitForSingleObject(instanceMutex, 0);
-        if (waitResult != WAIT_ABANDONED && waitResult != WAIT_OBJECT_0)
-        {
-            CloseHandle(instanceMutex);
-            instanceMutex = CreateMutexA(NULL, TRUE, APP_MUTEX_NAME);
-        }
+        log_bi::write("previous instance exited; taking over");
     }
 
     int result = 0;
+    win_bi::restart_request_bi restartRequest = win_bi::RESTART_NONE;
+    HANDLE restartGuard = INVALID_HANDLE_VALUE;
     {
         win_bi mainWindow(hInstance);
         if (mainWindow.Register() && mainWindow.Create(nCmdShow, autostarted))
         {
             result = (int)mainWindow.RunMessageLoop();
         }
+        restartRequest = mainWindow.restartRequest();
+        restartGuard = mainWindow.takeRestartGuard();
     }
 
     if (instanceMutex)
     {
         ReleaseMutex(instanceMutex);
         CloseHandle(instanceMutex);
+    }
+
+    if (restartRequest != win_bi::RESTART_NONE)
+    {
+        std::wstring exe = paths_bi::exePathWide();
+        bool launched = restartGuard != INVALID_HANDLE_VALUE &&
+                        launchReplacement(exe);
+
+        if (restartGuard != INVALID_HANDLE_VALUE)
+        {
+            CloseHandle(restartGuard);
+            restartGuard = INVALID_HANDLE_VALUE;
+        }
+
+        if (!launched)
+        {
+            bool restored = restoreAfterLaunchFailure(restartRequest, exe);
+            MessageBoxW(
+                NULL,
+                restored
+                    ? L"Kestrel could not start the replacement program. "
+                      L"The previous file layout was restored."
+                    : L"Kestrel could not start the replacement program, and "
+                      L"automatic file recovery also failed. Reinstall Kestrel "
+                      L"from the official release.",
+                L"Kestrel", MB_ICONERROR | MB_OK);
+            result = 4;
+        }
     }
 
     log_bi::shutdown();

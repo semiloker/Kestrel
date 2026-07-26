@@ -69,6 +69,8 @@ public:
     batteryinfo_bi() : hDevInfo(INVALID_HANDLE_VALUE), hBattery(INVALID_HANDLE_VALUE), tag(0)
     {
     }
+    batteryinfo_bi(const batteryinfo_bi &) = delete;
+    batteryinfo_bi &operator=(const batteryinfo_bi &) = delete;
 
     ~batteryinfo_bi()
     {

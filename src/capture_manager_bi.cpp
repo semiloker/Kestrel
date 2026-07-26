@@ -1,41 +1,147 @@
 #include "capture_manager_bi.h"
 
+#include <utility>
+
 capture_manager_bi::capture_manager_bi()
 {
+    InitializeCriticalSection(&finalizeLock);
 }
 
-void capture_manager_bi::toggle(const std::string &processName)
+capture_manager_bi::~capture_manager_bi()
 {
-    if (cap_.active())
+    stopActive();
+    waitForFinalize();
+    DeleteCriticalSection(&finalizeLock);
+}
+
+DWORD WINAPI capture_manager_bi::finalizeEntry(LPVOID param)
+{
+    capture_manager_bi *manager = static_cast<capture_manager_bi *>(param);
+
+    capture_bi::summary_bi summary;
+    bool succeeded = false;
+    try
     {
+        succeeded = manager->finalizeCapture &&
+                    manager->finalizeCapture->stop(&summary);
+    }
+    catch (...)
+    {
+        succeeded = false;
+    }
+
+    EnterCriticalSection(&manager->finalizeLock);
+    manager->pendingSummary = summary;
+    manager->pendingSucceeded = succeeded;
+    manager->pendingReady = true;
+    LeaveCriticalSection(&manager->finalizeLock);
+    return 0;
+}
+
+void capture_manager_bi::beginFinalize()
+{
+    if (!cap_.active() || finalizeThread)
+        return;
+
+    finalizeCapture.reset(new capture_bi(std::move(cap_)));
+    cap_ = capture_bi();
+
+    EnterCriticalSection(&finalizeLock);
+    pendingReady = false;
+    pendingSucceeded = false;
+    LeaveCriticalSection(&finalizeLock);
+
+    finalizeThread = CreateThread(
+        NULL, 0, &capture_manager_bi::finalizeEntry, this, 0, NULL);
+    if (!finalizeThread)
+    {
+        finalizeEntry(this);
+
         capture_bi::summary_bi summary;
-        if (cap_.stop(&summary))
+        bool succeeded = false;
+        EnterCriticalSection(&finalizeLock);
+        summary = pendingSummary;
+        succeeded = pendingSucceeded;
+        pendingReady = false;
+        LeaveCriticalSection(&finalizeLock);
+
+        finalizeCapture.reset();
+        if (succeeded)
         {
             lastCapture = summary;
             haveLastCapture = true;
             captureHistoryLoaded = false;
         }
     }
-    else
-    {
-        cap_.start(processName);
-    }
 }
 
-void capture_manager_bi::stopForRollback()
+void capture_manager_bi::pollFinalize()
 {
-    if (cap_.active())
+    if (!finalizeThread ||
+        WaitForSingleObject(finalizeThread, 0) != WAIT_OBJECT_0)
     {
-        capture_bi::summary_bi s;
-        cap_.stop(&s);
-        lastCapture = s;
+        return;
+    }
+
+    CloseHandle(finalizeThread);
+    finalizeThread = NULL;
+
+    capture_bi::summary_bi summary;
+    bool ready = false;
+    bool succeeded = false;
+    EnterCriticalSection(&finalizeLock);
+    ready = pendingReady;
+    succeeded = pendingSucceeded;
+    summary = pendingSummary;
+    pendingReady = false;
+    LeaveCriticalSection(&finalizeLock);
+
+    finalizeCapture.reset();
+    if (ready && succeeded)
+    {
+        lastCapture = summary;
         haveLastCapture = true;
         captureHistoryLoaded = false;
     }
 }
 
+void capture_manager_bi::waitForFinalize()
+{
+    if (finalizeThread)
+        WaitForSingleObject(finalizeThread, INFINITE);
+    pollFinalize();
+}
+
+bool capture_manager_bi::finalizing()
+{
+    pollFinalize();
+    return finalizeThread != NULL;
+}
+
+void capture_manager_bi::toggle(const std::string &processName, DWORD processId)
+{
+    pollFinalize();
+
+    if (cap_.active())
+    {
+        beginFinalize();
+    }
+    else if (!finalizeThread)
+    {
+        cap_.start(processName, processId);
+    }
+}
+
+void capture_manager_bi::stopActive()
+{
+    pollFinalize();
+    if (cap_.active())
+        beginFinalize();
+}
+
 void capture_manager_bi::loadHistory()
 {
+    pollFinalize();
     if (!captureHistoryLoaded)
     {
         capture_bi::loadIndex(&captureHistory);

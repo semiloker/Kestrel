@@ -4,10 +4,14 @@
 #define APP_NAME "Kestrel"
 #define APP_WINDOW_CLASS "Kestrel"
 #define APP_DATA_DIR "Kestrel"
+#define APP_DATA_DIR_WIDE L"Kestrel"
 #define APP_LOG_FILE "kestrel.log"
+#define APP_LOG_FILE_WIDE L"kestrel.log"
 #define APP_SETTINGS_FILE "settings.ini"
 
 #define APP_MUTEX_NAME "Local\\Kestrel_SingleInstance"
+#define APP_MUTEX_NAME_WIDE L"Local\\Kestrel_SingleInstance"
+#define APP_RESTART_WAIT_ARG_WIDE L"--wait-for-pid"
 #define APP_ETW_SESSION L"KestrelHudTrace"
 #define APP_OVERLAY_CLASS "KestrelHudOverlay"
 
