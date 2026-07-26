@@ -62,6 +62,11 @@ struct hud_row_bi
     hud_color_bi color;
 };
 
+// HUD strings are UTF-8 but the panel is a fixed monospace grid, so every width
+// calculation has to count characters rather than bytes. Continuation bytes
+// (10xxxxxx) belong to the character before them and take no cell of their own.
+size_t hud_display_width(const std::string &utf8);
+
 enum hud_element_kind_bi
 {
     HUD_EL_ROW = 0,
@@ -83,14 +88,23 @@ enum hud_metric_id_bi
     HUD_M_NETDOWN,
     HUD_M_NETUP,
     HUD_M_DISK,
+    // Appended, never inserted: hud.metricOrder persists these as raw indices.
+    HUD_M_CPUTEMP,
+    HUD_M_GPUTEMP,
     HUD_M_COUNT
 };
 
+// One plot per unit, drawn in this order. Frame rate is deliberately not part
+// of HUD_G_MS: a 144 fps trace shares no axis with a 7 ms frame interval, and
+// putting them together flattens the millisecond rows against the top of the
+// plot. Values here are not persisted, so the order can be changed freely.
 enum hud_graph_id_bi
 {
     HUD_G_NONE = -1,
-    HUD_G_MS = 0,
+    HUD_G_FPS = 0,
+    HUD_G_MS,
     HUD_G_PERCENT,
+    HUD_G_TEMP,
     HUD_G_MEMORY,
     HUD_G_POWER,
     HUD_G_BATTERY,

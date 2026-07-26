@@ -732,104 +732,315 @@ bool resource_usage_bi::updateCpuPower()
     return true;
 }
 
+// An ACPI zone that reports outside this band is reporting a placeholder, not a
+// sensor. Kelvin readings of 0 and "critical trip point" constants are common.
+static bool plausibleZoneTemp(double celsius)
+{
+    return celsius > 5.0 && celsius < 125.0;
+}
+
+// Zones are named after the ACPI path (\_TZ.TZ00, ACPI\ThermalZone\CPUZ_0, ...).
+static bool zoneNamesCpu(const std::string &lowerName)
+{
+    return lowerName.find("cpu") != std::string::npos ||
+           lowerName.find("proc") != std::string::npos;
+}
+
+bool resource_usage_bi::openTempQuery()
+{
+    if (tempQuery != NULL)
+        return true;
+
+    if (tempQueryFailed)
+        return false;
+
+    if (PdhOpenQueryW(NULL, 0, &tempQuery) != ERROR_SUCCESS)
+    {
+        tempQuery = NULL;
+        tempQueryFailed = true;
+        return false;
+    }
+
+    // High Precision Temperature is deci-Kelvin, Temperature is whole Kelvin.
+    // Prefer the former and keep the latter for kernels that only expose it.
+    if (PdhAddEnglishCounterW(tempQuery,
+                              L"\\Thermal Zone Information(*)\\High Precision Temperature",
+                              0, &thermalPreciseCounter) != ERROR_SUCCESS)
+        thermalPreciseCounter = NULL;
+
+    if (PdhAddEnglishCounterW(tempQuery, L"\\Thermal Zone Information(*)\\Temperature",
+                              0, &thermalCounter) != ERROR_SUCCESS)
+        thermalCounter = NULL;
+
+    if (thermalPreciseCounter == NULL && thermalCounter == NULL)
+    {
+        PdhCloseQuery(tempQuery);
+        tempQuery = NULL;
+        tempQueryFailed = true;
+        log_bi::write("temps: no Thermal Zone Information counters on this system");
+        return false;
+    }
+
+    PdhCollectQueryData(tempQuery);
+    return true;
+}
+
+bool resource_usage_bi::readThermalZonePdh(double *celsiusOut)
+{
+    if (!openTempQuery())
+        return false;
+
+    if (PdhCollectQueryData(tempQuery) != ERROR_SUCCESS)
+        return false;
+
+    // Two passes so a CPU-named zone always wins over a hotter chassis zone.
+    double best = -1.0;
+    double bestCpu = -1.0;
+    std::string bestName;
+    std::string bestCpuName;
+
+    for (int pass = 0; pass < 2; ++pass)
+    {
+        PDH_HCOUNTER counter = (pass == 0) ? thermalPreciseCounter : thermalCounter;
+        if (counter == NULL)
+            continue;
+
+        DWORD bufferSize = 0;
+        DWORD itemCount = 0;
+
+        if (PdhGetFormattedCounterArrayW(counter, PDH_FMT_DOUBLE, &bufferSize,
+                                         &itemCount, NULL) != (PDH_STATUS)PDH_MORE_DATA ||
+            bufferSize == 0)
+            continue;
+
+        thermalBuffer.resize(bufferSize);
+        PDH_FMT_COUNTERVALUE_ITEM_W *items =
+            reinterpret_cast<PDH_FMT_COUNTERVALUE_ITEM_W *>(&thermalBuffer[0]);
+
+        if (PdhGetFormattedCounterArrayW(counter, PDH_FMT_DOUBLE, &bufferSize,
+                                         &itemCount, items) != ERROR_SUCCESS)
+            continue;
+
+        for (DWORD i = 0; i < itemCount; ++i)
+        {
+            if (items[i].FmtValue.CStatus != ERROR_SUCCESS)
+                continue;
+
+            double kelvin = (pass == 0) ? items[i].FmtValue.doubleValue / 10.0
+                                        : items[i].FmtValue.doubleValue;
+            double celsius = kelvin - 273.15;
+
+            if (!plausibleZoneTemp(celsius))
+                continue;
+
+            std::string name;
+            for (const wchar_t *p = items[i].szName; p && *p; ++p)
+                name += (char)tolower((int)(*p & 0xFF));
+
+            if (zoneNamesCpu(name) && celsius > bestCpu)
+            {
+                bestCpu = celsius;
+                bestCpuName = name;
+            }
+            else if (celsius > best)
+            {
+                best = celsius;
+                bestName = name;
+            }
+        }
+
+        // The precise counter covers every zone; no need to read the coarse one.
+        if (bestCpu >= 0.0 || best >= 0.0)
+            break;
+    }
+
+    double picked = (bestCpu >= 0.0) ? bestCpu : best;
+    if (picked < 0.0)
+        return false;
+
+    if (!cpuTempLogged)
+    {
+        log_bi::write("temps: cpu from ACPI zone '%s' via pdh, %.1f C",
+                      (bestCpu >= 0.0 ? bestCpuName : bestName).c_str(), picked);
+        cpuTempLogged = true;
+    }
+
+    *celsiusOut = picked;
+    return true;
+}
+
+bool resource_usage_bi::readThermalZoneWmi(double *celsiusOut)
+{
+    if (thermalWmiFailed)
+        return false;
+
+    if (thermalSvc == NULL)
+    {
+        // The constructor already put this thread in an MTA; connect once and
+        // keep the proxy, a fresh ConnectServer every second is far too costly
+        // for a UI-thread poll.
+        IWbemLocator *pLoc = NULL;
+        if (FAILED(CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER,
+                                    IID_IWbemLocator, (LPVOID *)&pLoc)) ||
+            !pLoc)
+        {
+            thermalWmiFailed = true;
+            return false;
+        }
+
+        BSTR ns = SysAllocString(L"ROOT\\WMI");
+        HRESULT hres = pLoc->ConnectServer(ns, NULL, NULL, NULL, 0, NULL, NULL, &thermalSvc);
+        SysFreeString(ns);
+        pLoc->Release();
+
+        if (FAILED(hres) || !thermalSvc)
+        {
+            thermalSvc = NULL;
+            thermalWmiFailed = true;
+            return false;
+        }
+
+        if (FAILED(CoSetProxyBlanket(thermalSvc, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, NULL,
+                                     RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
+                                     NULL, EOAC_NONE)))
+        {
+            thermalSvc->Release();
+            thermalSvc = NULL;
+            thermalWmiFailed = true;
+            return false;
+        }
+    }
+
+    BSTR lang = SysAllocString(L"WQL");
+    BSTR query = SysAllocString(L"SELECT InstanceName, CurrentTemperature "
+                                L"FROM MSAcpi_ThermalZoneTemperature");
+    IEnumWbemClassObject *pEnum = NULL;
+    HRESULT hres = thermalSvc->ExecQuery(lang, query,
+                                         WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
+                                         NULL, &pEnum);
+    SysFreeString(lang);
+    SysFreeString(query);
+
+    if (FAILED(hres) || !pEnum)
+    {
+        // The class is simply absent on most desktops; stop asking.
+        thermalWmiFailed = true;
+        return false;
+    }
+
+    double best = -1.0;
+    double bestCpu = -1.0;
+    std::string bestName;
+    std::string bestCpuName;
+
+    IWbemClassObject *pObj = NULL;
+    ULONG ret = 0;
+
+    while (pEnum->Next(1000, 1, &pObj, &ret) == S_OK && pObj)
+    {
+        VARIANT vt;
+        VariantInit(&vt);
+
+        if (SUCCEEDED(pObj->Get(L"CurrentTemperature", 0, &vt, 0, 0)) &&
+            (vt.vt == VT_I4 || vt.vt == VT_UI4))
+        {
+            // Deci-Kelvin, 2732 == 0 C.
+            double celsius = ((double)vt.lVal - 2732.0) / 10.0;
+
+            if (plausibleZoneTemp(celsius))
+            {
+                VARIANT inst;
+                VariantInit(&inst);
+                std::string name;
+
+                if (SUCCEEDED(pObj->Get(L"InstanceName", 0, &inst, 0, 0)) && inst.vt == VT_BSTR)
+                {
+                    for (const wchar_t *p = inst.bstrVal; p && *p; ++p)
+                        name += (char)tolower((int)(*p & 0xFF));
+                }
+                VariantClear(&inst);
+
+                if (zoneNamesCpu(name) && celsius > bestCpu)
+                {
+                    bestCpu = celsius;
+                    bestCpuName = name;
+                }
+                else if (celsius > best)
+                {
+                    best = celsius;
+                    bestName = name;
+                }
+            }
+        }
+
+        VariantClear(&vt);
+        pObj->Release();
+        pObj = NULL;
+    }
+
+    pEnum->Release();
+
+    double picked = (bestCpu >= 0.0) ? bestCpu : best;
+    if (picked < 0.0)
+        return false;
+
+    if (!cpuTempLogged)
+    {
+        log_bi::write("temps: cpu from ACPI zone '%s' via wmi, %.1f C",
+                      (bestCpu >= 0.0 ? bestCpuName : bestName).c_str(), picked);
+        cpuTempLogged = true;
+    }
+
+    *celsiusOut = picked;
+    return true;
+}
+
 bool resource_usage_bi::updateTemps()
 {
     cpuInfo.cpuTempAvailable = false;
     gpuInfo.gpuTempAvailable = false;
 
-    HRESULT hres = CoInitializeEx(0, COINIT_MULTITHREADED);
-    if (FAILED(hres) && hres != RPC_E_CHANGED_MODE)
-        return false;
-
-    IWbemLocator *pLoc = nullptr;
-    hres = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER,
-                            IID_IWbemLocator, (LPVOID *)&pLoc);
-    if (FAILED(hres))
+    gpu_sensor_bi::reading_bi gpu;
+    if (gpuSensor.readTemperature(&gpu))
     {
-        CoUninitialize();
-        return false;
-    }
+        gpuInfo.gpuTempC = gpu.temperatureC;
+        gpuInfo.gpuTempAvailable = true;
 
-    IWbemServices *pSvc = nullptr;
-    BSTR ns = SysAllocString(L"ROOT\\WMI");
-    hres = pLoc->ConnectServer(ns, NULL, NULL, NULL, 0, NULL, NULL, &pSvc);
-    SysFreeString(ns);
-
-    if (FAILED(hres))
-    {
-        pLoc->Release();
-        CoUninitialize();
-        return false;
-    }
-
-    hres = CoSetProxyBlanket(pSvc, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, NULL,
-                             RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
-                             NULL, EOAC_NONE);
-    if (FAILED(hres))
-    {
-        pSvc->Release();
-        pLoc->Release();
-        CoUninitialize();
-        return false;
-    }
-
-    BSTR lang = SysAllocString(L"WQL");
-    BSTR query = SysAllocString(L"SELECT * FROM MSAcpi_ThermalZoneTemperature");
-    IEnumWbemClassObject *pEnum = nullptr;
-    hres = pSvc->ExecQuery(lang, query,
-                           WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
-                           NULL, &pEnum);
-    SysFreeString(lang);
-    SysFreeString(query);
-
-    if (SUCCEEDED(hres) && pEnum)
-    {
-        IWbemClassObject *pObj = nullptr;
-        ULONG ret = 0;
-
-        while (pEnum->Next(10000, 1, &pObj, &ret) == S_OK)
+        if (!gpuTempLogged)
         {
-            VARIANT vt;
-            VariantInit(&vt);
-
-            if (SUCCEEDED(pObj->Get(L"CurrentTemperature", 0, &vt, 0, 0)) &&
-                vt.vt == VT_I4)
-            {
-                double tempC = ((int)vt.uintVal - 2732) / 10.0;
-
-                VARIANT inst;
-                VariantInit(&inst);
-                std::string name = "CPU";
-                if (SUCCEEDED(pObj->Get(L"InstanceName", 0, &inst, 0, 0)) &&
-                    inst.vt == VT_BSTR)
-                {
-                    char buf[256];
-                    WideCharToMultiByte(CP_UTF8, 0, inst.bstrVal, -1, buf, sizeof(buf), NULL, NULL);
-                    name = buf;
-                }
-                VariantClear(&inst);
-
-                if (name.find("CPU") != std::string::npos || name.find("cpu") != std::string::npos ||
-                    name.find("CPUZ") != std::string::npos)
-                {
-                    cpuInfo.cpuTempC = tempC;
-                    cpuInfo.cpuTempAvailable = true;
-                }
-                else
-                {
-                    gpuInfo.gpuTempC = tempC;
-                    gpuInfo.gpuTempAvailable = true;
-                }
-            }
-            VariantClear(&vt);
-            pObj->Release();
+            log_bi::write("temps: gpu from %s on '%s', %.1f C (limit %.0f C)",
+                          gpu.source, gpu.adapterName.c_str(), gpu.temperatureC,
+                          gpu.temperatureMaxC);
+            gpuTempLogged = true;
         }
-        pEnum->Release();
+    }
+    else if (!gpuTempLogged)
+    {
+        log_bi::write("temps: no gpu thermal sensor exposed by the driver");
+        gpuTempLogged = true;
     }
 
-    pSvc->Release();
-    pLoc->Release();
-    CoUninitialize();
+    // Afterburner's block carries the real die sensor. Everything else falls
+    // back to an ACPI zone, which on desktops tracks the board rather than the
+    // package and can sit near room temperature under full load.
+    double cpuCelsius = 0.0;
+    if (mahmSensor.readCpuTemperature(&cpuCelsius))
+    {
+        cpuInfo.cpuTempC = cpuCelsius;
+        cpuInfo.cpuTempAvailable = true;
+        cpuInfo.cpuTempApproximate = false;
+    }
+    else if (readThermalZonePdh(&cpuCelsius) || readThermalZoneWmi(&cpuCelsius))
+    {
+        cpuInfo.cpuTempC = cpuCelsius;
+        cpuInfo.cpuTempAvailable = true;
+        cpuInfo.cpuTempApproximate = true;
+    }
+    else if (!cpuTempLogged)
+    {
+        log_bi::write("temps: no ACPI thermal zone exposes a cpu reading");
+        cpuTempLogged = true;
+    }
 
     return cpuInfo.cpuTempAvailable || gpuInfo.gpuTempAvailable;
 }
@@ -959,6 +1170,13 @@ bool resource_usage_bi::updateGpuTime(DWORD pid, double *busyMsOut)
 
 void resource_usage_bi::cleanup()
 {
+    // Release COM interfaces before dropping the apartment.
+    if (thermalSvc != NULL)
+    {
+        thermalSvc->Release();
+        thermalSvc = NULL;
+    }
+
     CoUninitialize();
 
     if (sharedQuery != NULL)
@@ -966,6 +1184,16 @@ void resource_usage_bi::cleanup()
         PdhCloseQuery(sharedQuery);
         sharedQuery = NULL;
     }
+
+    if (tempQuery != NULL)
+    {
+        PdhCloseQuery(tempQuery);
+        tempQuery = NULL;
+    }
+
+    thermalPreciseCounter = NULL;
+    thermalCounter = NULL;
+    thermalBuffer.clear();
 
     cpuTotalCounter = NULL;
     cpuCoreCounters.clear();

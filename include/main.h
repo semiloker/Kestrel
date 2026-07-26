@@ -33,10 +33,11 @@ public:
     bool Register();
     bool Create(int nCmdShow, bool startInTray);
 
-    void AddTrayIcon();
+    bool AddTrayIcon();
     void UpdateTrayTooltip();
     void RemoveTrayIcon();
     void ShowTrayMenu();
+    void OnTaskbarCreated();
 
     void UpdateOverlayHud();
 

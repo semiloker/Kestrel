@@ -21,7 +21,7 @@ namespace
     // HUD_M_* enum in hud_bi.h.
     const char *METRIC_KEYS[HUD_M_COUNT] = {
         "fps", "pre", "gpums", "cpu", "gpu", "ram", "commit", "cpuw", "gpuw", "batteryd",
-        "netdown", "netup", "disk"};
+        "netdown", "netup", "disk", "cputemp", "gputemp"};
     static_assert(sizeof(METRIC_KEYS) / sizeof(METRIC_KEYS[0]) == HUD_M_COUNT,
                   "METRIC_KEYS must have one entry per HUD_M_* metric");
 

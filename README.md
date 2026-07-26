@@ -36,7 +36,9 @@ Kestrel sits between the two on purpose:
 
 - **No kernel driver, no installer, no service.** A single portable executable.
   CPU package power is read through the Windows Energy Meter counter set rather
-  than a ring-0 MSR driver.
+  than a ring-0 MSR driver. The same rule sets the ceiling on what Kestrel can
+  tell you about CPU temperature — see [Temperatures](#temperatures), which is
+  honest about it.
 - **Real frame timing, not an estimate.** Frame rate, frame interval and
   per-frame GPU time come from ETW, the same event stream Intel PresentMon uses,
   attributed to the process that is actually rendering.
@@ -74,8 +76,9 @@ alongside Kestrel.
   Apple Metal Performance HUD
 - Stays above composited fullscreen and borderless windowed games
 - Any of the four screen corners, adjustable margin
-- Rolling graphs holding 24 seconds of history, grouped by unit so milliseconds,
-  percentages, memory and watts each get an independently scaled plot
+- Rolling graphs holding 24 seconds of history, grouped by unit so frame rate,
+  milliseconds, percentages, temperatures, memory and watts each get an
+  independently scaled plot
 - Per-metric visibility and per-metric graph toggles
 - Redraw rate of 50, 100, 250 or 500 ms
 - Global hotkeys: `Ctrl+Alt+H` to show and hide, `Ctrl+Alt+1/2/3` to switch
@@ -104,8 +107,61 @@ alongside Kestrel.
   actually bought you anything
 - GPU utilisation and per-process GPU time
 - **Video memory in use against the adapter's capacity**
+- CPU and GPU temperature, shown as `CPT` and `GPT`. Read
+  [Temperatures](#temperatures) before trusting the CPU figure
 - Physical memory and commit charge
 - Display resolution, render scale, refresh rate and composition state
+
+### Temperatures
+
+Temperature is the one reading Windows does not hand out evenly, so it is worth
+knowing where each number comes from.
+
+**GPU (`GPT`)** needs nothing extra. Kestrel asks the display driver through the
+WDDM adapter interface, the same source Task Manager reads, so the value is the
+die temperature the card itself reports and it works on any vendor. Integrated
+graphics normally expose no sensor, and the row stays a dash.
+
+**CPU (`CPT`)** is the hard one. The digital thermal sensor on an Intel or AMD
+package sits behind a model-specific register that only kernel-mode code can
+read. Every tool that shows a true core temperature ships a signed kernel driver
+to get at it. Kestrel does not ship one, for the same reason it does not inject
+into games.
+
+That leaves two sources. Kestrel picks the better one automatically:
+
+| Source | What you get | Requirement |
+| --- | --- | --- |
+| MSI Afterburner shared memory | The real package temperature | Afterburner running |
+| ACPI thermal zone | An approximation, often a board sensor | None |
+
+If MSI Afterburner is running — many people already keep it resident for fan
+curves — Kestrel reads the package temperature it publishes. Nothing has to be
+configured in either program, and Kestrel neither launches nor talks to
+Afterburner; it only reads the block Afterburner shares while it is up.
+
+Otherwise Kestrel falls back to the ACPI thermal zone exposed by your firmware.
+On laptops that zone usually tracks the CPU closely enough to be useful. **On
+desktops it frequently does not.** Many boards publish only a chipset or chassis
+zone, which will sit near 28 °C whether the machine is idle or pinned at 100%.
+
+So if your CPU temperature never moves, it is not a bug in the reading, it is the
+wrong sensor being the only one available. The tooltip on the setting tells you
+which case you are in, and the log names the exact source:
+
+```
+temps: gpu from d3dkmt on 'NVIDIA GeForce RTX 2070 SUPER', 32.8 C (limit 88 C)
+temps: cpu from MSI Afterburner shared memory, 58.0 C
+```
+
+against the fallback:
+
+```
+temps: cpu from ACPI zone '\_tz.tz00' via pdh, 27.9 C
+```
+
+Temperature is never guessed. If no source answers, the row shows a dash and the
+toggle is greyed out rather than displaying a number Kestrel cannot stand behind.
 
 ### Battery
 
@@ -149,6 +205,9 @@ alongside Kestrel.
 - Windows 10 version 1607 or newer, 64-bit
 - Administrator rights **only** for frame-timing metrics. Everything else works
   as a normal user.
+- MSI Afterburner, optional and only for the CPU package temperature. Without it
+  that row falls back to an ACPI thermal zone, which is approximate on most
+  desktops. See [Temperatures](#temperatures).
 
 ---
 
@@ -227,6 +286,21 @@ Switch the game to borderless windowed mode.
 through the Windows Energy Meter counter set. The log lists the instances that
 were found.
 
+**CPU temperature is stuck near room temperature.** You are reading an ACPI
+thermal zone that measures the board rather than the processor, which is what
+most desktop firmware exposes. Start MSI Afterburner and the row switches to the
+real package temperature by itself. The background is in
+[Temperatures](#temperatures).
+
+**The temperature toggle is greyed out.** No source answered at all: no thermal
+zone for the CPU, or a driver that reports no sensor for the GPU. The log says
+which. Integrated graphics commonly have no GPU sensor.
+
+**GPU temperature is missing on a laptop with two GPUs.** Kestrel polls adapters
+in order of dedicated video memory and takes the first one that answers, so the
+discrete card wins. If only the integrated GPU is present, there is usually
+nothing to report.
+
 ---
 
 ## Building from source
@@ -289,6 +363,8 @@ Key modules:
 | `overlay_bi.*` | Layered-window overlay and Direct2D rendering |
 | `hud_bi.*` | Overlay data model, series history, layout |
 | `resource_usage_bi.*` | Shared PDH query for CPU, GPU, power and memory |
+| `gpu_sensor_bi.*` | GPU temperature via the WDDM adapter block, NVML fallback |
+| `mahm_sensor_bi.*` | Optional CPU package temperature from MSI Afterburner |
 | `autostart_bi.*` | Registry and Task Scheduler autostart |
 | `settings_bi.*` | INI persistence |
 
@@ -306,8 +382,8 @@ Ordered roughly by priority. Suggestions are welcome, open an issue.
 - **Wider frame-source coverage.** Recognise more present events so that OpenGL
   and Vulkan titles work without manual configuration.
 - **Multi-GPU awareness.** Report each adapter separately instead of summing.
-- **Temperature and fan readings** where the platform exposes them without a
-  driver.
+- **Fan speed.** The WDDM adapter block already carries GPU fan RPM next to the
+  temperature Kestrel reads; surface it.
 - **Packaging.** A winget manifest and a signed release binary.
 - **Localisation.** The interface is English only today.
 
@@ -331,9 +407,10 @@ The log is the single most useful thing to attach. It records why a metric was
 unavailable, which process is being measured and which event source supplies the
 frame timing.
 
-Pull requests are welcome. Please match the existing style: the codebase carries
-no comments, headers are included as `#include "name.h"` with no relative paths,
-and the build must stay warning-free under `-Wall`.
+Pull requests are welcome. Please match the existing style: comments are sparse
+and explain why a thing is done rather than restate what the code says, headers
+are included as `#include "name.h"` with no relative paths, and the build must
+stay warning-free under `-Wall`.
 
 ---
 

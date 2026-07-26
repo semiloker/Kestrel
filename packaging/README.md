@@ -28,7 +28,7 @@ winget validate --manifest packaging/winget
 winget install --manifest packaging/winget    # local test
 ```
 Then open a PR against [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs)
-under `manifests/s/semiloker/Kestrel/1.4.0/`.
+under `manifests/s/semiloker/Kestrel/1.4.1/`.
 
 ## Scoop
 
@@ -44,7 +44,7 @@ scoop install kestrel
 cd packaging/chocolatey
 # copy the release kestrel.exe into tools/ OR keep the Get-ChocolateyWebFile URL
 choco pack
-choco push kestrel.1.4.0.nupkg --source https://push.chocolatey.org/
+choco push kestrel.1.4.1.nupkg --source https://push.chocolatey.org/
 ```
 
 ## MSIX / Microsoft Store

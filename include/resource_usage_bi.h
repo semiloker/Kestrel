@@ -17,7 +17,9 @@
 #include <dxgi1_2.h>
 
 #include "autostart_bi.h"
+#include "gpu_sensor_bi.h"
 #include "interfaces_bi.h"
+#include "mahm_sensor_bi.h"
 
 #define DIV 1048576
 
@@ -152,6 +154,28 @@ private:
 
     bool openSharedQuery();
     bool collectShared();
+
+    // Temperature sources. The thermal-zone query is kept apart from
+    // sharedQuery because updateTemps() runs on the UI thread while the shared
+    // query belongs to the sampler thread, and a PDH query is not safe to
+    // collect from two threads at once.
+    bool openTempQuery();
+    bool readThermalZonePdh(double *celsiusOut);
+    bool readThermalZoneWmi(double *celsiusOut);
+
+    gpu_sensor_bi gpuSensor;
+    mahm_sensor_bi mahmSensor;
+    bool gpuTempLogged = false;
+    bool cpuTempLogged = false;
+
+    PDH_HQUERY tempQuery = NULL;
+    PDH_HCOUNTER thermalPreciseCounter = NULL;
+    PDH_HCOUNTER thermalCounter = NULL;
+    bool tempQueryFailed = false;
+    std::vector<BYTE> thermalBuffer;
+
+    IWbemServices *thermalSvc = NULL;
+    bool thermalWmiFailed = false;
 
     PDH_HQUERY sharedQuery = NULL;
     bool sharedQueryFailed = false;

@@ -15,7 +15,7 @@ struct hud_layout_bi
 {
     float padLeft = 9.0f;
     float padRight = 9.0f;
-    float padBottom = 17.0f;
+    float padBottom = 16.0f;
 
     float padTop = 16.0f;
 
@@ -128,6 +128,7 @@ private:
 
     float fontSize = 13.8f;
     float glyphTopOffset = 0.0f;
+    float capHeightPx = 0.0f;
 
     float curPanelW = 241.0f;
     float curPanelH = 181.0f;

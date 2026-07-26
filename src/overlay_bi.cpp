@@ -12,12 +12,14 @@ static std::wstring toWide(const std::string &s)
     if (s.empty())
         return std::wstring();
 
-    int len = MultiByteToWideChar(CP_ACP, 0, s.c_str(), (int)s.size(), NULL, 0);
+    // HUD strings are UTF-8 literals (the degree sign among them); decoding them
+    // as ANSI would split every multi-byte character into mojibake.
+    int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), NULL, 0);
     if (len <= 0)
         return std::wstring();
 
     std::wstring out((size_t)len, L'\0');
-    MultiByteToWideChar(CP_ACP, 0, s.c_str(), (int)s.size(), &out[0], len);
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &out[0], len);
     return out;
 }
 
@@ -163,7 +165,7 @@ void overlay_bi::setScale(int percent)
 
     layout.padLeft = 9.0f * s;
     layout.padRight = 9.0f * s;
-    layout.padBottom = 17.0f * s;
+    layout.padBottom = 16.0f * s;
     layout.padTop = 16.0f * s;
     layout.lineHeight = 16.4f * s;
     layout.cornerRadius = 10.0f * s;
@@ -314,6 +316,7 @@ bool overlay_bi::setupFont()
 
             glyphTopOffset = ((float)fm.ascent - (float)fm.capHeight) * fontSize / upem;
             ascentPx = (float)fm.ascent * fontSize / upem;
+            capHeightPx = (float)fm.capHeight * fontSize / upem;
         }
 
         face->Release();
@@ -463,6 +466,9 @@ void overlay_bi::drawLine(const std::string &text, float startColumn, float y, c
 
     float advance = layout.charAdvance;
 
+    // Cells consumed so far. Bracket runs are ASCII, so splitting on '[' / ']'
+    // never lands inside a multi-byte sequence.
+    size_t cell = 0;
     size_t i = 0;
     while (i < text.size())
     {
@@ -472,8 +478,10 @@ void overlay_bi::drawLine(const std::string &text, float startColumn, float y, c
         while (j < text.size() && ((text[j] == '[' || text[j] == ']') == isBracket))
             ++j;
 
-        std::wstring run = toWide(text.substr(i, j - i));
-        float x = layout.padLeft + (startColumn + (float)i) * advance;
+        std::string chunk = text.substr(i, j - i);
+        std::wstring run = toWide(chunk);
+        float x = layout.padLeft + (startColumn + (float)cell) * advance;
+        cell += hud_display_width(chunk);
 
         pBrush->SetColor(isBracket ? theme.bracket : color);
 
@@ -556,7 +564,18 @@ float overlay_bi::measureLayout(const std::vector<hud_element_bi> &elements) con
     }
 
     if (lastWasGraph)
+    {
         y -= layout.graphGap;
+    }
+    else if (!elements.empty() && capHeightPx > 0.0f)
+    {
+        // A row advances by a full line box, but its ink stops at the baseline.
+        // Measuring to the box bottom padded the panel with the line's descent
+        // slack on top of padBottom, so the gap under the last row read several
+        // pixels deeper than the one above the first. Trim back to the baseline
+        // and both edges get exactly padTop / padBottom.
+        y -= (layout.lineHeight - capHeightPx);
+    }
 
     return y;
 }
@@ -589,7 +608,10 @@ void overlay_bi::drawOneGraph(hud_graph_id_bi group, float top, float axisY)
 
     double scaleMax = 0.0;
 
-    if (group == HUD_G_PERCENT || group == HUD_G_MEMORY)
+    // Percent and memory are 0-100 by definition; temperature gets the same
+    // fixed scale so the trace reads against a stable ceiling instead of
+    // rescaling every time the hottest sample changes.
+    if (group == HUD_G_PERCENT || group == HUD_G_MEMORY || group == HUD_G_TEMP)
     {
         scaleMax = 100.0;
     }
@@ -721,7 +743,7 @@ void overlay_bi::Render()
 
             if (!el.row.right.empty())
             {
-                float column = (float)columns - (float)el.row.right.size();
+                float column = (float)columns - (float)hud_display_width(el.row.right);
                 if (column < 0.0f)
                     column = 0.0f;
 

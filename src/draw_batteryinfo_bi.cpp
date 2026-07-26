@@ -1230,8 +1230,9 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         break;
 
     case GROUP_FRAME:
-        r = {L"Frame rate", &ov->hud.metrics[HUD_M_FPS].show, nullptr, MC_CPU, frameOk,
-             L"Frames per second (FPS:)", HUD_M_FPS};
+        r = {L"Frame rate", &ov->hud.metrics[HUD_M_FPS].show,
+             &ov->hud.metrics[HUD_M_FPS].graphed, MC_CPU, frameOk,
+             L"Frames per second (FPS:), on its own scale", HUD_M_FPS};
         out.push_back(r);
         r = {L"Frame interval", &ov->hud.metrics[HUD_M_PRE].show,
              &ov->hud.metrics[HUD_M_PRE].graphed, MC_CPU, frameOk,
@@ -1253,9 +1254,10 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         r = {L"Video memory", &ru->gpuInfo.show_vram, nullptr, MC_GPU,
              ru->gpuInfo.vramTotalMB > 0.0, L"VRAM used and total (VRM:)"};
         out.push_back(r);
-        r = {L"Temperature", &ru->gpuInfo.show_gpuTemp, nullptr, MC_NONE,
+        r = {L"Temperature", &ru->gpuInfo.show_gpuTemp,
+             &ov->hud.metrics[HUD_M_GPUTEMP].graphed, MC_GPUMS,
              ru->gpuInfo.gpuTempAvailable,
-             L"GPU temperature from WMI thermal zone (experimental)"};
+             L"GPU die temperature from the display driver (GPT: C)", HUD_M_GPUTEMP};
         out.push_back(r);
         r = {L"Power draw", &ru->gpuInfo.show_gpuPower,
              &ov->hud.metrics[HUD_M_GPUW].graphed, MC_POWER, ru->gpuInfo.gpuPowerAvailable,
@@ -1273,9 +1275,13 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         r = {L"Load", &ru->cpuInfo.show_UsagePercent, &ov->hud.metrics[HUD_M_CPU].graphed,
              MC_CPU, true, L"Total CPU utilisation (CPU: %)", HUD_M_CPU};
         out.push_back(r);
-        r = {L"Temperature", &ru->cpuInfo.show_cpuTemp, nullptr, MC_NONE,
+        r = {L"Temperature", &ru->cpuInfo.show_cpuTemp,
+             &ov->hud.metrics[HUD_M_CPUTEMP].graphed, MC_POWER,
              ru->cpuInfo.cpuTempAvailable,
-             L"CPU temperature from WMI thermal zone (experimental)"};
+             ru->cpuInfo.cpuTempApproximate
+                 ? L"ACPI zone (CPT: C) - approximate, run Afterburner for the die"
+                 : L"CPU die temperature via MSI Afterburner (CPT: C)",
+             HUD_M_CPUTEMP};
         out.push_back(r);
         r = {L"Package power", &ru->cpuInfo.show_packagePower,
              &ov->hud.metrics[HUD_M_CPUW].graphed, MC_POWER, powerOk,
@@ -1441,6 +1447,7 @@ void draw_batteryinfo_bi::applyPreset(int preset, overlay_bi *ov, resource_usage
         ov->hud.showBottleneck = true;
         ov->hud.showEfficiency = true;
         ov->hud.metrics[HUD_M_FPS].show = true;
+        ov->hud.metrics[HUD_M_FPS].graphed = true;
         ov->hud.metrics[HUD_M_PRE].show = true;
         ov->hud.metrics[HUD_M_PRE].graphed = true;
         ov->hud.metrics[HUD_M_GPUMS].show = true;

@@ -131,9 +131,8 @@ bool win_bi::Create(int nCmdShow, bool startInTray)
         return false;
     }
 
-    if (startInTray && ru_bi && ru_bi->minimize_To_Tray)
+    if (startInTray && ru_bi && ru_bi->minimize_To_Tray && AddTrayIcon())
     {
-        AddTrayIcon();
         log_bi::write("autostart: launched into the tray");
     }
     else
@@ -182,6 +181,14 @@ LRESULT CALLBACK win_bi::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
     if (pThis->destroyed && msg != WM_DESTROY)
     {
         return DefWindowProc(hwnd, msg, wParam, lParam);
+    }
+
+    // Registered messages have no compile-time value, so they cannot sit in the
+    // switch below.
+    if (msg == tray_icon_bi::taskbarCreatedMessage())
+    {
+        pThis->OnTaskbarCreated();
+        return 0;
     }
 
     switch (msg)
@@ -433,10 +440,22 @@ void win_bi::ToggleOverlay()
     InvalidateRect(hwnd, NULL, TRUE);
 }
 
-void win_bi::AddTrayIcon()
+bool win_bi::AddTrayIcon()
 {
-    trayIcon.add(hwnd, hAppIcon);
+    if (!trayIcon.add(hwnd, hAppIcon))
+        return false;
+
     UpdateTrayTooltip();
+    return true;
+}
+
+void win_bi::OnTaskbarCreated()
+{
+    if (trayIcon.restore())
+    {
+        UpdateTrayTooltip();
+        log_bi::write("tray: icon re-added after an explorer restart");
+    }
 }
 
 void win_bi::UpdateTrayTooltip()
@@ -500,6 +519,12 @@ void win_bi::OnCreate(HWND hwnd)
 {
     this->hwnd = hwnd;
 
+    // When we run elevated, UIPI drops explorer's TaskbarCreated broadcast
+    // unless the message is allowed through explicitly - without this the tray
+    // icon never comes back after an explorer restart in admin mode.
+    ChangeWindowMessageFilterEx(hwnd, tray_icon_bi::taskbarCreatedMessage(),
+                                MSGFLT_ALLOW, NULL);
+
     SetTimer(hwnd, 1, 1000, NULL);
     SetTimer(hwnd, 2, 10000, NULL);
 
@@ -531,11 +556,10 @@ void win_bi::OnResize(WPARAM wParam)
 
     if (wParam == SIZE_MINIMIZED)
     {
-        if (ru_bi && ru_bi->minimize_To_Tray)
-        {
+        // Same ordering rule as OnClose: if the icon fails, stay minimised on
+        // the taskbar rather than disappearing entirely.
+        if (ru_bi && ru_bi->minimize_To_Tray && AddTrayIcon())
             ShowWindow(hwnd, SW_HIDE);
-            AddTrayIcon();
-        }
     }
 }
 
@@ -782,6 +806,14 @@ void win_bi::UpdateOverlayHud()
     if (bi_bi->present && bi_bi->info_1s.rateValid)
         ov_bi->hud.push(HUD_M_BATTERYD, fabs(bi_bi->info_1s.rateW));
 
+    ov_bi->hud.metrics[HUD_M_CPUTEMP].available = ru_bi->cpuInfo.cpuTempAvailable;
+    if (ru_bi->cpuInfo.cpuTempAvailable)
+        ov_bi->hud.push(HUD_M_CPUTEMP, ru_bi->cpuInfo.cpuTempC);
+
+    ov_bi->hud.metrics[HUD_M_GPUTEMP].available = ru_bi->gpuInfo.gpuTempAvailable;
+    if (ru_bi->gpuInfo.gpuTempAvailable)
+        ov_bi->hud.push(HUD_M_GPUTEMP, ru_bi->gpuInfo.gpuTempC);
+
     ov_bi->hud.push(HUD_M_CPU, snapCpu.UsageValue);
     ov_bi->hud.push(HUD_M_GPU, snapGpu.gpuLoadValue);
     ov_bi->hud.push(HUD_M_RAM, snapRam.loadValue);
@@ -795,6 +827,8 @@ void win_bi::UpdateOverlayHud()
     ov_bi->hud.metrics[HUD_M_COMMIT].show = ru_bi->ramInfo.show_ullTotalPageFile;
     ov_bi->hud.metrics[HUD_M_CPUW].show = ru_bi->cpuInfo.show_packagePower;
     ov_bi->hud.metrics[HUD_M_GPUW].show = ru_bi->gpuInfo.show_gpuPower;
+    ov_bi->hud.metrics[HUD_M_CPUTEMP].show = ru_bi->cpuInfo.show_cpuTemp;
+    ov_bi->hud.metrics[HUD_M_GPUTEMP].show = ru_bi->gpuInfo.show_gpuTemp;
     ov_bi->hud.showDevice = ru_bi->gpuInfo.show_gpuName;
     ov_bi->hud.showMem = ru_bi->ramInfo.show_ullTotalPhys;
 
@@ -877,18 +911,6 @@ void win_bi::UpdateOverlayHud()
         for (size_t i = 0; i < snapCpu.CoreUsagePercents.size(); ++i)
             ov_bi->hud.addExtraRow("Core " + std::to_string(i + 1),
                                    snapCpu.CoreUsagePercents[i]);
-    }
-
-    if (ru_bi->cpuInfo.show_cpuTemp && ru_bi->cpuInfo.cpuTempAvailable)
-    {
-        std::string val = std::format("{:.0f} C", ru_bi->cpuInfo.cpuTempC);
-        ov_bi->hud.addExtraRow("CPU Temp", val);
-    }
-
-    if (ru_bi->gpuInfo.show_gpuTemp && ru_bi->gpuInfo.gpuTempAvailable)
-    {
-        std::string val = std::format("{:.0f} C", ru_bi->gpuInfo.gpuTempC);
-        ov_bi->hud.addExtraRow("GPU Temp", val);
     }
 
     if (ru_bi->ramInfo.show_ullAvailPhys)
@@ -1524,8 +1546,12 @@ void win_bi::OnClose()
 {
     if (ru_bi && ru_bi->minimize_To_Tray)
     {
-        ShowWindow(hwnd, SW_HIDE);
-        AddTrayIcon();
+        // Hide only once the icon is really in the tray. Hiding first would
+        // leave the app running with no window and no icon to bring it back.
+        if (AddTrayIcon())
+            ShowWindow(hwnd, SW_HIDE);
+        else
+            log_bi::write("tray: icon unavailable, keeping the window on screen");
     }
     else
         DestroyWindow(hwnd);

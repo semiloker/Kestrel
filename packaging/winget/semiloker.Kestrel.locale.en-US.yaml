@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
 PackageIdentifier: semiloker.Kestrel
-PackageVersion: 1.4.0
+PackageVersion: 1.4.1
 PackageLocale: en-US
 Publisher: semiloker
 PublisherUrl: https://github.com/semiloker
@@ -24,6 +24,6 @@ Tags:
   - monitoring
   - gaming
   - etw
-ReleaseNotesUrl: https://github.com/semiloker/Kestrel/releases/tag/v1.4.0
+ReleaseNotesUrl: https://github.com/semiloker/Kestrel/releases/tag/v1.4.1
 ManifestType: defaultLocale
 ManifestVersion: 1.6.0

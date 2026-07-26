@@ -69,6 +69,9 @@ public:
         bool packagePowerAvailable = false;
         double cpuTempC = 0.0;
         bool cpuTempAvailable = false;
+        // True while the reading comes from an ACPI zone rather than the die
+        // sensor, which on desktops tracks the board and barely moves.
+        bool cpuTempApproximate = true;
         bool show_cpuTemp = false;
         bool show_cpuName = false;
         bool show_architecture = false;

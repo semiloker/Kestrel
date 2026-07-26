@@ -77,6 +77,25 @@ double hud_series_bi::at(size_t i) const
     return data[(oldest + i) % data.size()];
 }
 
+size_t hud_display_width(const std::string &utf8)
+{
+    size_t cells = 0;
+    for (size_t i = 0; i < utf8.size(); ++i)
+        if (((unsigned char)utf8[i] & 0xC0) != 0x80)
+            ++cells;
+    return cells;
+}
+
+// std::format pads to a byte count, which under-pads any field holding a
+// multi-byte character such as the degree sign.
+static std::string padCells(const std::string &text, size_t cells)
+{
+    size_t width = hud_display_width(text);
+    if (width >= cells)
+        return text;
+    return text + std::string(cells - width, ' ');
+}
+
 hud_bi::hud_bi()
     : deviceName("Unknown GPU"),
       resolution("[0x0]"),
@@ -89,8 +108,9 @@ hud_bi::hud_bi()
     metrics[HUD_M_FPS].label = "FPS:";
     metrics[HUD_M_FPS].unit = "";
     metrics[HUD_M_FPS].color = HUD_COLOR_WHITE;
-    metrics[HUD_M_FPS].graph = HUD_G_MS;
+    metrics[HUD_M_FPS].graph = HUD_G_FPS;
     metrics[HUD_M_FPS].show = true;
+    metrics[HUD_M_FPS].graphed = true;
 
     metrics[HUD_M_PRE].label = "Pre:";
     metrics[HUD_M_PRE].unit = "ms";
@@ -166,6 +186,20 @@ hud_bi::hud_bi()
     metrics[HUD_M_DISK].color = HUD_COLOR_ORANGE;
     metrics[HUD_M_DISK].graph = HUD_G_NONE;
     metrics[HUD_M_DISK].show = false;
+
+    metrics[HUD_M_CPUTEMP].label = "CPT:";
+    metrics[HUD_M_CPUTEMP].unit = "°C";
+    metrics[HUD_M_CPUTEMP].color = HUD_COLOR_ORANGE;
+    metrics[HUD_M_CPUTEMP].graph = HUD_G_TEMP;
+    metrics[HUD_M_CPUTEMP].show = false;
+    metrics[HUD_M_CPUTEMP].graphed = true;
+
+    metrics[HUD_M_GPUTEMP].label = "GPT:";
+    metrics[HUD_M_GPUTEMP].unit = "°C";
+    metrics[HUD_M_GPUTEMP].color = HUD_COLOR_RED;
+    metrics[HUD_M_GPUTEMP].graph = HUD_G_TEMP;
+    metrics[HUD_M_GPUTEMP].show = false;
+    metrics[HUD_M_GPUTEMP].graphed = true;
 }
 
 void hud_bi::initStaticInfo(const std::string &adapterName)
@@ -305,7 +339,8 @@ void hud_bi::addExtraRow(const std::string &label, const std::string &value)
     extra_row_bi row;
     row.left = label.substr(0, HUD_MAX_COLUMNS);
 
-    size_t room = (label.size() + 1 < HUD_MAX_COLUMNS) ? (HUD_MAX_COLUMNS - label.size() - 1) : 0;
+    size_t used = hud_display_width(row.left);
+    size_t room = (used + 1 < HUD_MAX_COLUMNS) ? (HUD_MAX_COLUMNS - used - 1) : 0;
     row.right = value.substr(0, room);
 
     extraRows.push_back(row);
@@ -339,7 +374,7 @@ int hud_bi::columnsFor(const std::vector<hud_element_bi> &layout) const
             continue;
 
         const hud_row_bi &r = layout[i].row;
-        size_t need = r.left.size() + r.right.size();
+        size_t need = hud_display_width(r.left) + hud_display_width(r.right);
 
         if (!r.left.empty() && !r.right.empty())
             need += 1;
@@ -400,7 +435,7 @@ static std::string formatFixed(double value, int decimals)
 
 static std::string fmtLeft(const char *label, const char *value, const char *unit)
 {
-    return std::format("{:<4} {:>6} {:<2}", label, value, unit);
+    return std::format("{:<4} {:>6} {}", label, value, padCells(unit, 2));
 }
 
 static std::string fmtLeftNum(const char *label, double value, int decimals, const char *unit)
@@ -433,9 +468,9 @@ static std::string fmtRightTotalPct(double total, int decimals, double percent)
 static std::string formatMetricLeft(const hud_metric_bi &m)
 {
     if (!m.available || m.series.size() == 0)
-        return std::format("{:<4} {:>6} {:<2}", m.label, "-", m.unit);
-    return std::format("{:<4} {:6.2f} {:<2}", m.label,
-                       clampDisplay(m.series.current()), m.unit);
+        return std::format("{:<4} {:>6} {}", m.label, "-", padCells(m.unit, 2));
+    return std::format("{:<4} {:6.2f} {}", m.label,
+                       clampDisplay(m.series.current()), padCells(m.unit, 2));
 }
 
 static std::string formatMetricRight(const hud_metric_bi &m)
