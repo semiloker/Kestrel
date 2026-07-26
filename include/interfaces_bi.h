@@ -302,6 +302,7 @@ public:
 
     virtual sample_bi sample() = 0;
     virtual size_t drainFrames(frame_sample_bi *out, size_t max) = 0;
+    virtual void discardFrames() = 0;
     virtual unsigned long long framesDropped() const = 0;
 
     virtual void setFallbackSource(provider_bi provider, unsigned eventId) = 0;

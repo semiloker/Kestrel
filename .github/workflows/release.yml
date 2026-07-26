@@ -6,101 +6,236 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Tag to build and publish
+        description: Existing tag to validate, build, and publish
         required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
-  release:
-    name: Build and publish
-    runs-on: windows-latest
-
+  validate-tag:
+    name: Validate immutable release tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.validate.outputs.tag }}
+      commit: ${{ steps.validate.outputs.commit }}
+      version: ${{ steps.validate.outputs.version }}
+      artifact_name: ${{ steps.validate.outputs.artifact_name }}
+      prerelease: ${{ steps.validate.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 0
+          fetch-tags: true
 
-      - name: Set up MSYS2
-        id: msys2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: false
-          install: >-
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-make
-
-      - name: Build
-        shell: cmd
-        run: |
-          set "PATH=${{ steps.msys2.outputs.msys2-location }}\MINGW64\bin;%PATH%"
-          mingw32-make
-
-      - name: Resolve version
-        id: version
+      - name: Validate tag, checkout, and version
+        id: validate
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
-          $tag = if ($env:GITHUB_REF -like "refs/tags/*") {
-            $env:GITHUB_REF -replace "^refs/tags/", ""
+          $tag = $env:RELEASE_TAG
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            throw "release tag is empty"
+          }
+
+          $tagPattern = '^v(?<version>(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))(?<suffix>-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
+          if ($tag -notmatch $tagPattern) {
+            throw "tag '$tag' must match vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-suffix"
+          }
+          $version = $Matches["version"]
+          $isPrerelease = -not [string]::IsNullOrEmpty($Matches["suffix"])
+
+          $tagRef = "refs/tags/$tag"
+          git show-ref --verify --quiet $tagRef
+          if ($LASTEXITCODE -ne 0) {
+            throw "tag '$tag' does not exist in the repository"
+          }
+
+          $tagCommit = (git rev-parse "$tagRef^{commit}").Trim()
+          $headCommit = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $headCommit -ne $tagCommit) {
+            throw "checkout HEAD '$headCommit' does not match tag '$tag' commit '$tagCommit'"
+          }
+
+          $header = Get-Content -LiteralPath "include/app_identity_bi.h" -Raw
+          $versionMatch = [regex]::Match(
+            $header,
+            '(?m)^\s*#define\s+APP_VERSION_STRING\s+"(?<version>\d+\.\d+\.\d+\.\d+)"'
+          )
+          if (-not $versionMatch.Success) {
+            throw "APP_VERSION_STRING was not found"
+          }
+
+          $expectedFileVersion = "$version.0"
+          $sourceVersion = $versionMatch.Groups["version"].Value
+          if ($sourceVersion -ne $expectedFileVersion) {
+            throw "tag '$tag' requires APP_VERSION_STRING '$expectedFileVersion', found '$sourceVersion'"
+          }
+
+          $artifactName = "kestrel-release-$tag-$($tagCommit.Substring(0, 12))"
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "commit=$tagCommit" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "artifact_name=$artifactName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "prerelease=$($isPrerelease.ToString().ToLowerInvariant())" |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+          Write-Host "Validated $tag at $tagCommit with application version $sourceVersion"
+
+  ci:
+    name: Run every release gate
+    needs: validate-tag
+    uses: ./.github/workflows/ci.yml
+    with:
+      checkout_ref: ${{ needs.validate-tag.outputs.commit }}
+      artifact_name: ${{ needs.validate-tag.outputs.artifact_name }}
+      release_build: true
+    secrets: inherit
+
+  publish:
+    name: Package and publish canonical artifact
+    needs: [validate-tag, ci]
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.validate-tag.outputs.commit }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Download canonical binary
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.validate-tag.outputs.artifact_name }}
+          path: canonical
+
+      - name: Validate and package canonical artifact
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ needs.validate-tag.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.validate-tag.outputs.commit }}
+          RELEASE_VERSION: ${{ needs.validate-tag.outputs.version }}
+          SIGNING_CERT_PFX: ${{ secrets.SIGNING_CERT_PFX }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: |
+          $tagRef = "refs/tags/$env:RELEASE_TAG"
+          git show-ref --verify --quiet $tagRef
+          if ($LASTEXITCODE -ne 0) {
+            throw "tag '$env:RELEASE_TAG' disappeared before publication"
+          }
+          $currentTagCommit = (git rev-parse "$tagRef^{commit}").Trim()
+          if ($currentTagCommit -ne $env:RELEASE_COMMIT) {
+            throw "tag '$env:RELEASE_TAG' moved from '$env:RELEASE_COMMIT' to '$currentTagCommit'"
+          }
+
+          $artifactFiles = @(Get-ChildItem -LiteralPath "canonical" -File -Recurse)
+          if ($artifactFiles.Count -ne 1 -or $artifactFiles[0].Name -ne "kestrel.exe") {
+            $found = ($artifactFiles | ForEach-Object FullName) -join ", "
+            throw "canonical artifact must contain only kestrel.exe; found: $found"
+          }
+          $canonicalExe = $artifactFiles[0]
+          if ($canonicalExe.Length -lt 500000) {
+            throw "canonical kestrel.exe is suspiciously small: $($canonicalExe.Length) bytes"
+          }
+
+          $binaryInfo = $canonicalExe.VersionInfo
+          if ($binaryInfo.ProductName -ne "Kestrel") {
+            throw "canonical binary has the wrong product name '$($binaryInfo.ProductName)'"
+          }
+          $expectedFileVersion = [Version]"$env:RELEASE_VERSION.0"
+          $actualFileVersion = [Version]$binaryInfo.FileVersion
+          if ($actualFileVersion -ne $expectedFileVersion) {
+            throw "canonical binary version '$actualFileVersion' does not match '$expectedFileVersion'"
+          }
+
+          $hasCertificate = -not [string]::IsNullOrWhiteSpace($env:SIGNING_CERT_PFX)
+          $hasPassword = -not [string]::IsNullOrWhiteSpace($env:SIGNING_CERT_PASSWORD)
+          if ($hasCertificate -xor $hasPassword) {
+            throw "SIGNING_CERT_PFX and SIGNING_CERT_PASSWORD must either both be set or both be empty"
+          }
+          if ($hasCertificate) {
+            $signature = Get-AuthenticodeSignature -FilePath $canonicalExe.FullName
+            if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+              throw "configured release signature is invalid: $($signature.StatusMessage)"
+            }
+            Write-Host "Verified release signature from $($signature.SignerCertificate.Subject)"
           } else {
-            "${{ github.event.inputs.tag }}"
-          }
-          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "releasing $tag"
-
-      - name: Verify binary identity matches the tag
-        shell: pwsh
-        run: |
-          $item = Get-Item bin/kestrel.exe
-          $info = $item.VersionInfo
-          Write-Host "product: $($info.ProductName)"
-          Write-Host "version: $($info.FileVersion)"
-
-          if ($info.ProductName -ne "Kestrel") { throw "wrong product name in version resource" }
-
-          $tag = "${{ steps.version.outputs.tag }}" -replace "^v", ""
-          $fileVersion = $info.FileVersion -replace "\.0$", ""
-          if (-not $info.FileVersion.StartsWith($tag)) {
-            Write-Warning "tag $tag does not match FileVersion $($info.FileVersion); update APP_VERSION in include/app_identity_bi.h"
+            Write-Host "No signing certificate is configured; publishing an unsigned binary"
           }
 
-      - name: Package
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory dist | Out-Null
-          Copy-Item bin/kestrel.exe dist/
-          Copy-Item README.md dist/
-          Copy-Item LICENSE dist/
+          $releaseRoot = New-Item -ItemType Directory -Path "release-assets"
+          $packageRoot = New-Item -ItemType Directory -Path "package-root"
+          $publishedExe = Join-Path $releaseRoot.FullName "kestrel.exe"
+          Copy-Item -LiteralPath $canonicalExe.FullName -Destination $publishedExe
+          Copy-Item -LiteralPath $canonicalExe.FullName -Destination $packageRoot.FullName
+          Copy-Item -LiteralPath "README.md" -Destination $packageRoot.FullName
+          Copy-Item -LiteralPath "LICENSE" -Destination $packageRoot.FullName
 
-          $hash = (Get-FileHash dist/kestrel.exe -Algorithm SHA256).Hash.ToLower()
-          "$hash  kestrel.exe" | Out-File -FilePath dist/kestrel.exe.sha256 -Encoding ascii
-          Write-Host "sha256: $hash"
+          $hash = (Get-FileHash -LiteralPath $publishedExe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $checksumPath = Join-Path $releaseRoot.FullName "kestrel.exe.sha256"
+          "$hash  kestrel.exe" | Set-Content -LiteralPath $checksumPath -Encoding ascii
 
-          Compress-Archive -Path dist/* -DestinationPath "kestrel-${{ steps.version.outputs.tag }}-win64.zip"
+          $zipName = "kestrel-$env:RELEASE_TAG-win64.zip"
+          $zipPath = Join-Path $releaseRoot.FullName $zipName
+          Compress-Archive -Path "$($packageRoot.FullName)\*" -DestinationPath $zipPath -CompressionLevel Optimal
 
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
+          $verificationRoot = New-Item -ItemType Directory -Path "package-verification"
+          Expand-Archive -LiteralPath $zipPath -DestinationPath $verificationRoot.FullName
+          $expectedEntries = @("kestrel.exe", "LICENSE", "README.md")
+          $actualEntries = @(
+            Get-ChildItem -LiteralPath $verificationRoot.FullName -File |
+              Sort-Object Name |
+              ForEach-Object Name
+          )
+          if (($actualEntries -join "`n") -ne ($expectedEntries -join "`n")) {
+            throw "release ZIP has unexpected entries: $($actualEntries -join ', ')"
+          }
+
+          $zippedExe = Join-Path $verificationRoot.FullName "kestrel.exe"
+          $zippedHash = (Get-FileHash -LiteralPath $zippedExe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($zippedHash -ne $hash) {
+            throw "ZIP contains a different kestrel.exe: expected $hash, found $zippedHash"
+          }
+
+          Write-Host "canonical sha256: $hash"
+          Write-Host "verified ZIP: $zipName"
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: Kestrel ${{ steps.version.outputs.tag }}
+          tag_name: ${{ needs.validate-tag.outputs.tag }}
+          target_commitish: ${{ needs.validate-tag.outputs.commit }}
+          name: Kestrel ${{ needs.validate-tag.outputs.tag }}
           generate_release_notes: true
           draft: false
-          prerelease: ${{ contains(steps.version.outputs.tag, '-') }}
+          prerelease: ${{ needs.validate-tag.outputs.prerelease }}
+          fail_on_unmatched_files: true
+          overwrite_files: false
           files: |
-            bin/kestrel.exe
-            dist/kestrel.exe.sha256
-            kestrel-${{ steps.version.outputs.tag }}-win64.zip
+            release-assets/kestrel.exe
+            release-assets/kestrel.exe.sha256
+            release-assets/kestrel-${{ needs.validate-tag.outputs.tag }}-win64.zip
           body: |
-            ## Kestrel ${{ steps.version.outputs.tag }}
+            ## Kestrel ${{ needs.validate-tag.outputs.tag }}
 
             Battery, system and frame-time overlay for Windows.
 
             ### Install
 
-            Download `kestrel.exe` and run it. No installer, nothing written
-            outside `%APPDATA%\Kestrel`.
+            Download `kestrel.exe` and run it. There is no installer. Runtime
+            settings, logs and captures stay in `%APPDATA%\Kestrel`; optional
+            autostart creates the documented scheduled task or `Run` value.
 
             Frame-timing metrics need administrator rights. Enable
             **Run as administrator** in Settings to register a scheduled task
@@ -112,7 +247,7 @@ jobs:
             Get-FileHash kestrel.exe -Algorithm SHA256
             ```
 
-            Compare against `kestrel.exe.sha256` attached below.
+            Compare the result with the attached `kestrel.exe.sha256`.
 
             ### Requirements
 

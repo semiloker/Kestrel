@@ -70,6 +70,8 @@ public:
 
     overlay_bi();
     ~overlay_bi();
+    overlay_bi(const overlay_bi &) = delete;
+    overlay_bi &operator=(const overlay_bi &) = delete;
 
     HWND g_hwnd = NULL;
 
@@ -98,6 +100,7 @@ public:
     void Render() override;
 
     void UpdatePosition() override;
+    void setTargetWindow(HWND target);
     void ForceTopMost() override;
 
     const D2D1_COLOR_F &resolveColor(hud_color_bi c) const;
@@ -145,6 +148,7 @@ private:
     int panelH = 0;
 
     DWORD lastTopMostTick = 0;
+    HMONITOR targetMonitor = NULL;
 
     HINSTANCE hInst = NULL;
 };

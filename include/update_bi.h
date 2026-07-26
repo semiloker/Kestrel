@@ -30,8 +30,10 @@ public:
     void downloadAsync(HWND notify);
     void cancel();
 
-    bool applyAndRestart();
-    bool rollback();
+    // On success the caller owns a deny-write/delete verification handle and
+    // must keep it open through creation of the replacement process.
+    bool apply(HANDLE *verifiedGuardOut);
+    bool rollback(HANDLE *verifiedGuardOut);
 
     bool backupExists() const;
     std::string backupVersion() const;
@@ -42,9 +44,9 @@ public:
     int progressPercent() const;
     bool busy() const;
 
-    static std::string exeDirectory();
-    static std::string stagedPath();
-    static std::string backupPath();
+    static std::wstring exeDirectory();
+    static std::wstring stagedPath();
+    static std::wstring backupPath();
 
 private:
     static DWORD WINAPI threadEntry(LPVOID param);
@@ -60,6 +62,9 @@ private:
     state_bi current;
     std::string version;
     std::string assetUrl;
+    std::string checksumUrl;
+    std::string expectedSha256;
+    bool stagedSigned;
     std::string note;
     volatile LONG progress;
 

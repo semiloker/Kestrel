@@ -33,8 +33,8 @@ public:
     void collectFrom(const resource_usage_bi *ru, const overlay_bi *ov,
                      const draw_batteryinfo_bi *draw, const batteryinfo_bi *bi);
 
-    bool exportJson(const char *path) const;
-    bool importJson(const char *path);
+    bool exportJson(const wchar_t *path) const;
+    bool importJson(const wchar_t *path);
 
     void setProfile(const std::string &exe);
     std::string currentProfile() const { return activeProfile; }
@@ -46,6 +46,8 @@ public:
 
 private:
     std::string getValue(const char *key) const;
+    void collectStateFrom(const resource_usage_bi *ru, const overlay_bi *ov,
+                          const draw_batteryinfo_bi *draw, const batteryinfo_bi *bi);
 
     std::map<std::string, std::string> values;
     std::map<std::string, std::map<std::string, std::string>> profiles;

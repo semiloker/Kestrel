@@ -81,6 +81,7 @@ public:
     struct capture_view_bi
     {
         bool recording = false;
+        bool finalizing = false;
         double seconds = 0.0;
         size_t frames = 0;
         double liveFps = 0.0;
@@ -122,6 +123,8 @@ public:
         bool battery = false;
         std::string chemistry;
         int threads = 0;
+        bool hotkeys = true;
+        std::string hotkeyReason;
     };
 
     struct click_result_bi

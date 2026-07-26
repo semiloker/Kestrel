@@ -3,8 +3,10 @@
 
 #include <dxgi.h>
 #include <dxgi1_2.h>
+#include <shlobj.h>
 
 #include <algorithm>
+#include <vector>
 
 // ─── D3DKMT ────────────────────────────────────────────────────────────────
 //
@@ -79,6 +81,14 @@ typedef int (*pfn_nvml_name_bi)(void *, char *, unsigned int);
 
 const int NVML_TEMPERATURE_GPU_BI = 0;
 
+#ifndef LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR
+#define LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR 0x00000100
+#endif
+
+#ifndef LOAD_LIBRARY_SEARCH_SYSTEM32
+#define LOAD_LIBRARY_SEARCH_SYSTEM32 0x00000800
+#endif
+
 // A reading outside this band means the driver handed us a placeholder rather
 // than a sensor value.
 bool plausibleTemp(double c)
@@ -97,6 +107,40 @@ std::string narrow(const wchar_t *w)
         return std::string();
 
     return std::string(buf);
+}
+
+HMODULE loadTrustedNvml()
+{
+    std::vector<wchar_t> systemDirectory(MAX_PATH);
+    UINT systemLength = GetSystemDirectoryW(&systemDirectory[0],
+                                            (UINT)systemDirectory.size());
+    if (systemLength > 0 && systemLength < systemDirectory.size())
+    {
+        std::wstring path(&systemDirectory[0], systemLength);
+        path += L"\\nvml.dll";
+
+        HMODULE module = LoadLibraryExW(
+            path.c_str(), NULL,
+            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (module)
+            return module;
+    }
+
+    wchar_t programFiles[MAX_PATH] = {};
+    if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROGRAM_FILES, NULL,
+                                   SHGFP_TYPE_CURRENT, programFiles)))
+    {
+        std::wstring path(programFiles);
+        path += L"\\NVIDIA Corporation\\NVSMI\\nvml.dll";
+
+        HMODULE module = LoadLibraryExW(
+            path.c_str(), NULL,
+            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (module)
+            return module;
+    }
+
+    return NULL;
 }
 
 }  // namespace
@@ -282,14 +326,7 @@ bool gpu_sensor_bi::ensureNvml()
     if (!haveNvidia)
         return false;
 
-    nvml_ = LoadLibraryA("nvml.dll");
-    if (!nvml_)
-    {
-        char path[MAX_PATH];
-        if (ExpandEnvironmentStringsA("%ProgramW6432%\\NVIDIA Corporation\\NVSMI\\nvml.dll",
-                                      path, MAX_PATH) > 0)
-            nvml_ = LoadLibraryA(path);
-    }
+    nvml_ = loadTrustedNvml();
 
     if (!nvml_)
         return false;

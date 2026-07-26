@@ -6,6 +6,11 @@
 class init_dwrite_bi
 {
 public:
+    init_dwrite_bi() = default;
+    ~init_dwrite_bi() { CleanupDirectWrite(); }
+    init_dwrite_bi(const init_dwrite_bi &) = delete;
+    init_dwrite_bi &operator=(const init_dwrite_bi &) = delete;
+
     IDWriteFactory* pDWriteFactory = nullptr;
 
     IDWriteTextFormat* pTextFormatDisplay = nullptr;

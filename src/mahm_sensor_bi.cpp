@@ -1,6 +1,8 @@
 #include "mahm_sensor_bi.h"
 #include "logger_bi.h"
 
+#include <cstdint>
+#include <cstring>
 #include <ctime>
 
 namespace
@@ -58,6 +60,7 @@ void mahm_sensor_bi::closeMapping()
     {
         UnmapViewOfFile(view_);
         view_ = NULL;
+        viewSize_ = 0;
     }
 
     if (map_)
@@ -94,6 +97,29 @@ bool mahm_sensor_bi::ensureMapping()
         return false;
     }
 
+    MEMORY_BASIC_INFORMATION region = {};
+    if (VirtualQuery(view_, &region, sizeof(region)) != sizeof(region) ||
+        region.State != MEM_COMMIT || region.RegionSize < sizeof(mahm_header_bi))
+    {
+        closeMapping();
+        return false;
+    }
+
+    uintptr_t viewAddress = reinterpret_cast<uintptr_t>(view_);
+    uintptr_t regionAddress = reinterpret_cast<uintptr_t>(region.BaseAddress);
+    if (viewAddress < regionAddress)
+    {
+        closeMapping();
+        return false;
+    }
+    size_t offset = static_cast<size_t>(viewAddress - regionAddress);
+    if (offset >= region.RegionSize)
+    {
+        closeMapping();
+        return false;
+    }
+    viewSize_ = region.RegionSize - offset;
+
     return true;
 }
 
@@ -105,14 +131,24 @@ bool mahm_sensor_bi::readCpuTemperature(double *celsiusOut)
     if (!ensureMapping())
         return false;
 
-    const mahm_header_bi *h = (const mahm_header_bi *)view_;
+    if (viewSize_ < sizeof(mahm_header_bi))
+    {
+        closeMapping();
+        return false;
+    }
+
+    mahm_header_bi header = {};
+    std::memcpy(&header, view_, sizeof(header));
+    const mahm_header_bi *h = &header;
 
     if (h->dwSignature == MAHM_SIGNATURE_DEAD)
         return false;  // monitoring disabled in Afterburner, keep the mapping
 
     if (h->dwSignature != MAHM_SIGNATURE || h->dwVersion < MAHM_MIN_VERSION ||
         h->dwHeaderSize < sizeof(mahm_header_bi) ||
-        h->dwEntrySize < MAHM_STRING_BLOCK + MAHM_PAYLOAD)
+        h->dwEntrySize < MAHM_STRING_BLOCK + MAHM_PAYLOAD ||
+        h->dwHeaderSize > viewSize_ ||
+        h->dwNumEntries > (viewSize_ - h->dwHeaderSize) / h->dwEntrySize)
     {
         closeMapping();
         return false;
@@ -133,16 +169,21 @@ bool mahm_sensor_bi::readCpuTemperature(double *celsiusOut)
     {
         const BYTE *entry = view_ + h->dwHeaderSize + (size_t)i * h->dwEntrySize;
 
-        const float *data = (const float *)(entry + MAHM_STRING_BLOCK);
-        const DWORD *tail = (const DWORD *)(entry + MAHM_STRING_BLOCK + 3 * sizeof(float));
-
-        DWORD gpu = tail[1];
-        DWORD srcId = tail[2];
+        float data = 0.0f;
+        DWORD gpu = 0;
+        DWORD srcId = 0;
+        std::memcpy(&data, entry + MAHM_STRING_BLOCK, sizeof(data));
+        std::memcpy(&gpu,
+                    entry + MAHM_STRING_BLOCK + 3 * sizeof(float) + sizeof(DWORD),
+                    sizeof(gpu));
+        std::memcpy(&srcId,
+                    entry + MAHM_STRING_BLOCK + 3 * sizeof(float) + 2 * sizeof(DWORD),
+                    sizeof(srcId));
 
         if (srcId != MAHM_SRC_CPU_TEMPERATURE)
             continue;
 
-        double celsius = (double)*data;
+        double celsius = (double)data;
         if (celsius <= 0.0 || celsius >= 150.0)
             continue;
 

@@ -73,6 +73,9 @@ set(WIN_LIBS
     user32
     comctl32
     winhttp
+    bcrypt
+    crypt32
+    wintrust
     version
     dxgi
 )
@@ -154,7 +157,7 @@ if(KESTREL_BUILD_TESTS)
     FetchContent_Declare(
         Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG v3.6.0
+        GIT_TAG 4e8d92bf02f7d1c8006a0e7a5ecabd8e62d98502
     )
     FetchContent_MakeAvailable(Catch2)
 
@@ -165,6 +168,7 @@ if(KESTREL_BUILD_TESTS)
     add_executable(kestrel_tests
         ${TEST_SRC_FILES}
         src/hud_bi.cpp
+        src/frame_stats_bi.cpp
     )
     target_include_directories(kestrel_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(kestrel_tests PRIVATE Catch2::Catch2WithMain)

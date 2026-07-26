@@ -8,13 +8,28 @@
 #include "logger_bi.h"
 #include "app_identity_bi.h"
 
+#include <algorithm>
+#include <cerrno>
+#include <charconv>
+#include <cctype>
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <fcntl.h>
 #include <format>
+#include <limits>
+#include <system_error>
+#include <io.h>
 
 namespace
 {
-    const char *SETTINGS_FILE = "settings.ini";
+    const char *PROFILE_JSON_PREFIX = "profile:";
+    const size_t MAX_JSON_BYTES = 4 * 1024 * 1024;
+    const size_t MAX_JSON_ENTRIES = 10000;
+    const size_t MAX_JSON_KEY_BYTES = 4096;
+    const size_t MAX_JSON_VALUE_BYTES = 1024 * 1024;
 
     // MUST have exactly HUD_M_COUNT entries — a missing key is a nullptr that
     // crashes applyTo/collectFrom via strlen(nullptr). Keep in sync with the
@@ -36,6 +51,337 @@ namespace
         size_t e = s.find_last_not_of(" \t\r\n");
         s = s.substr(b, e - b + 1);
     }
+
+    bool isIniSafeValue(const std::string &value)
+    {
+        return value.find('\0') == std::string::npos &&
+               value.find('\r') == std::string::npos &&
+               value.find('\n') == std::string::npos &&
+               (value.empty() ||
+                (!std::isspace((unsigned char)value.front()) &&
+                 !std::isspace((unsigned char)value.back())));
+    }
+
+    bool isIniSafeKey(const std::string &key)
+    {
+        return !key.empty() && isIniSafeValue(key) &&
+               key.front() != '#' && key.front() != ';' && key.front() != '[' &&
+               key.find('=') == std::string::npos;
+    }
+
+    bool isIniSafeProfile(const std::string &profile)
+    {
+        return !profile.empty() &&
+               profile.find('\0') == std::string::npos &&
+               profile.find('\r') == std::string::npos &&
+               profile.find('\n') == std::string::npos &&
+               profile.find(':') == std::string::npos;
+    }
+
+    std::string hexEncode(const std::string &value)
+    {
+        static const char HEX[] = "0123456789abcdef";
+        std::string encoded;
+        encoded.reserve(value.size() * 2);
+        for (unsigned char c : value)
+        {
+            encoded.push_back(HEX[c >> 4]);
+            encoded.push_back(HEX[c & 0x0f]);
+        }
+        return encoded;
+    }
+
+    bool hexDecode(const std::string &encoded, std::string *value)
+    {
+        if (encoded.empty() || (encoded.size() % 2) != 0)
+            return false;
+
+        value->clear();
+        value->reserve(encoded.size() / 2);
+        for (size_t i = 0; i < encoded.size(); i += 2)
+        {
+            const auto nibble = [](char c) -> int {
+                if (c >= '0' && c <= '9')
+                    return c - '0';
+                if (c >= 'a' && c <= 'f')
+                    return c - 'a' + 10;
+                if (c >= 'A' && c <= 'F')
+                    return c - 'A' + 10;
+                return -1;
+            };
+            int high = nibble(encoded[i]);
+            int low = nibble(encoded[i + 1]);
+            if (high < 0 || low < 0)
+                return false;
+            value->push_back((char)((high << 4) | low));
+        }
+        return true;
+    }
+
+    void skipJsonWhitespace(const std::string &text, size_t *pos)
+    {
+        while (*pos < text.size() &&
+               std::isspace((unsigned char)text[*pos]) != 0)
+        {
+            ++*pos;
+        }
+    }
+
+    bool parseHex4(const std::string &text, size_t pos, unsigned *value)
+    {
+        if (pos + 4 > text.size())
+            return false;
+
+        unsigned result = 0;
+        for (size_t i = 0; i < 4; ++i)
+        {
+            unsigned digit = 0;
+            char c = text[pos + i];
+            if (c >= '0' && c <= '9')
+                digit = (unsigned)(c - '0');
+            else if (c >= 'a' && c <= 'f')
+                digit = (unsigned)(c - 'a') + 10;
+            else if (c >= 'A' && c <= 'F')
+                digit = (unsigned)(c - 'A') + 10;
+            else
+                return false;
+            result = (result << 4) | digit;
+        }
+
+        *value = result;
+        return true;
+    }
+
+    bool appendUtf8(std::string *out, unsigned codePoint)
+    {
+        if (codePoint <= 0x7f)
+        {
+            out->push_back((char)codePoint);
+        }
+        else if (codePoint <= 0x7ff)
+        {
+            out->push_back((char)(0xc0 | (codePoint >> 6)));
+            out->push_back((char)(0x80 | (codePoint & 0x3f)));
+        }
+        else if (codePoint <= 0xffff)
+        {
+            if (codePoint >= 0xd800 && codePoint <= 0xdfff)
+                return false;
+            out->push_back((char)(0xe0 | (codePoint >> 12)));
+            out->push_back((char)(0x80 | ((codePoint >> 6) & 0x3f)));
+            out->push_back((char)(0x80 | (codePoint & 0x3f)));
+        }
+        else if (codePoint <= 0x10ffff)
+        {
+            out->push_back((char)(0xf0 | (codePoint >> 18)));
+            out->push_back((char)(0x80 | ((codePoint >> 12) & 0x3f)));
+            out->push_back((char)(0x80 | ((codePoint >> 6) & 0x3f)));
+            out->push_back((char)(0x80 | (codePoint & 0x3f)));
+        }
+        else
+        {
+            return false;
+        }
+        return true;
+    }
+
+    bool parseJsonString(const std::string &text, size_t *pos,
+                         size_t maxBytes, std::string *out)
+    {
+        if (*pos >= text.size() || text[*pos] != '"')
+            return false;
+
+        ++*pos;
+        out->clear();
+
+        while (*pos < text.size())
+        {
+            unsigned char c = (unsigned char)text[(*pos)++];
+            if (c == '"')
+                return true;
+            if (c < 0x20)
+                return false;
+
+            if (c != '\\')
+            {
+                out->push_back((char)c);
+            }
+            else
+            {
+                if (*pos >= text.size())
+                    return false;
+
+                char escaped = text[(*pos)++];
+                switch (escaped)
+                {
+                case '"': out->push_back('"'); break;
+                case '\\': out->push_back('\\'); break;
+                case '/': out->push_back('/'); break;
+                case 'b': out->push_back('\b'); break;
+                case 'f': out->push_back('\f'); break;
+                case 'n': out->push_back('\n'); break;
+                case 'r': out->push_back('\r'); break;
+                case 't': out->push_back('\t'); break;
+                case 'u':
+                {
+                    unsigned first = 0;
+                    if (!parseHex4(text, *pos, &first))
+                        return false;
+                    *pos += 4;
+
+                    unsigned codePoint = first;
+                    if (first >= 0xd800 && first <= 0xdbff)
+                    {
+                        if (*pos + 6 > text.size() ||
+                            text[*pos] != '\\' || text[*pos + 1] != 'u')
+                        {
+                            return false;
+                        }
+
+                        unsigned second = 0;
+                        if (!parseHex4(text, *pos + 2, &second) ||
+                            second < 0xdc00 || second > 0xdfff)
+                        {
+                            return false;
+                        }
+
+                        *pos += 6;
+                        codePoint = 0x10000 +
+                            ((first - 0xd800) << 10) + (second - 0xdc00);
+                    }
+                    else if (first >= 0xdc00 && first <= 0xdfff)
+                    {
+                        return false;
+                    }
+
+                    if (!appendUtf8(out, codePoint))
+                        return false;
+                    break;
+                }
+                default:
+                    return false;
+                }
+            }
+
+            if (out->size() > maxBytes)
+                return false;
+        }
+
+        return false;
+    }
+
+    bool parseFlatJsonObject(const std::string &text,
+                             std::map<std::string, std::string> *out)
+    {
+        size_t pos = 0;
+        skipJsonWhitespace(text, &pos);
+        if (pos >= text.size() || text[pos++] != '{')
+            return false;
+
+        skipJsonWhitespace(text, &pos);
+        if (pos < text.size() && text[pos] == '}')
+        {
+            ++pos;
+            skipJsonWhitespace(text, &pos);
+            return pos == text.size();
+        }
+
+        while (pos < text.size())
+        {
+            if (out->size() >= MAX_JSON_ENTRIES)
+                return false;
+
+            std::string key;
+            std::string value;
+            if (!parseJsonString(text, &pos, MAX_JSON_KEY_BYTES, &key) ||
+                key.empty())
+            {
+                return false;
+            }
+
+            skipJsonWhitespace(text, &pos);
+            if (pos >= text.size() || text[pos++] != ':')
+                return false;
+
+            skipJsonWhitespace(text, &pos);
+            if (!parseJsonString(text, &pos, MAX_JSON_VALUE_BYTES, &value))
+                return false;
+
+            if (!out->emplace(key, value).second)
+                return false;
+
+            skipJsonWhitespace(text, &pos);
+            if (pos >= text.size())
+                return false;
+            if (text[pos] == '}')
+            {
+                ++pos;
+                skipJsonWhitespace(text, &pos);
+                return pos == text.size();
+            }
+            if (text[pos++] != ',')
+                return false;
+            skipJsonWhitespace(text, &pos);
+        }
+
+        return false;
+    }
+
+    void writeJsonString(FILE *f, const std::string &text)
+    {
+        static const char HEX[] = "0123456789abcdef";
+
+        fputc('"', f);
+        for (size_t i = 0; i < text.size(); ++i)
+        {
+            unsigned char c = (unsigned char)text[i];
+            switch (c)
+            {
+            case '"': fputs("\\\"", f); break;
+            case '\\': fputs("\\\\", f); break;
+            case '\b': fputs("\\b", f); break;
+            case '\f': fputs("\\f", f); break;
+            case '\n': fputs("\\n", f); break;
+            case '\r': fputs("\\r", f); break;
+            case '\t': fputs("\\t", f); break;
+            default:
+                if (c < 0x20)
+                {
+                    char escaped[7] = {
+                        '\\', 'u', '0', '0', HEX[c >> 4], HEX[c & 0xf], '\0'};
+                    fputs(escaped, f);
+                }
+                else
+                {
+                    fputc(c, f);
+                }
+                break;
+            }
+        }
+        fputc('"', f);
+    }
+
+    FILE *createExclusiveRegularFile(const std::wstring &path)
+    {
+        HANDLE handle = CreateFileW(
+            path.c_str(), GENERIC_WRITE, 0, NULL, CREATE_NEW,
+            FILE_ATTRIBUTE_NORMAL | FILE_ATTRIBUTE_TEMPORARY, NULL);
+        if (handle == INVALID_HANDLE_VALUE)
+            return NULL;
+
+        int fd = _open_osfhandle(
+            (intptr_t)handle, _O_WRONLY | _O_BINARY);
+        if (fd < 0)
+        {
+            CloseHandle(handle);
+            return NULL;
+        }
+
+        FILE *file = _fdopen(fd, "wb");
+        if (!file)
+            _close(fd);
+        return file;
+    }
 }
 
 Result<void> settings_bi::load()
@@ -44,35 +390,86 @@ Result<void> settings_bi::load()
     profiles.clear();
     activeProfile.clear();
 
-    std::string path = paths_bi::inDataDir(SETTINGS_FILE);
+    std::wstring path = paths_bi::inDataDirWide(L"settings.ini");
     if (path.empty())
         return Result<void>(std::string("settings: data dir not available"));
 
-    FILE *f = fopen(path.c_str(), "r");
+    FILE *f = _wfopen(path.c_str(), L"rb");
     if (!f)
     {
         log_bi::write("settings: no saved file yet, using defaults");
         return Result<void>();
     }
 
-    std::string currentSection;
-    char line[512];
+    if (fseek(f, 0, SEEK_END) != 0)
+    {
+        fclose(f);
+        return Result<void>(std::string("settings: cannot read the settings file"));
+    }
+    long fileLength = ftell(f);
+    if (fileLength < 0 || (size_t)fileLength > MAX_JSON_BYTES ||
+        fseek(f, 0, SEEK_SET) != 0)
+    {
+        fclose(f);
+        return Result<void>(std::string("settings: settings file is too large"));
+    }
+
+    std::string content((size_t)fileLength, '\0');
+    if (fileLength > 0 &&
+        fread(&content[0], 1, (size_t)fileLength, f) != (size_t)fileLength)
+    {
+        fclose(f);
+        return Result<void>(std::string("settings: cannot read the settings file"));
+    }
+    fclose(f);
+
+    bool inNamedSection = false;
+    bool inProfileSection = false;
+    std::string profileName;
     int lineNum = 0;
-    while (fgets(line, sizeof(line), f))
+    size_t lineStart = 0;
+    while (lineStart < content.size())
     {
         ++lineNum;
-        std::string s(line);
+        size_t lineEnd = content.find('\n', lineStart);
+        std::string s = lineEnd == std::string::npos
+            ? content.substr(lineStart)
+            : content.substr(lineStart, lineEnd - lineStart);
+        lineStart = lineEnd == std::string::npos
+            ? content.size()
+            : lineEnd + 1;
 
         trim(s);
         if (s.empty() || s[0] == '#' || s[0] == ';')
             continue;
+        if (s.find('\0') != std::string::npos)
+        {
+            log_bi::write("settings: ignoring line %d (embedded NUL)", lineNum);
+            continue;
+        }
 
         if (s[0] == '[')
         {
+            inNamedSection = true;
+            inProfileSection = false;
+            profileName.clear();
+
             size_t close = s.find(']');
-            if (close == std::string::npos)
+            if (close == std::string::npos || close + 1 != s.size())
                 continue;
-            currentSection = s.substr(1, close - 1);
+
+            std::string section = s.substr(1, close - 1);
+            if (section.compare(0, 11, "ProfileHex:") == 0)
+            {
+                inProfileSection =
+                    hexDecode(section.substr(11), &profileName) &&
+                    isIniSafeProfile(profileName);
+            }
+            else if (section.compare(0, 8, "Profile:") == 0)
+            {
+                profileName = section.substr(8);
+                inProfileSection = isIniSafeProfile(profileName);
+            }
             continue;
         }
 
@@ -94,17 +491,20 @@ Result<void> settings_bi::load()
             continue;
         }
 
-        if (!currentSection.empty() && currentSection.find("Profile:") == 0)
+        if (inProfileSection)
         {
-            profiles[currentSection.substr(8)][key] = value;  // strip "Profile:" -> bare exe name
+            profiles[profileName][key] = value;
         }
-        else
+        else if (!inNamedSection)
         {
             values[key] = value;
         }
+        else
+        {
+            log_bi::write("settings: ignoring line %d in unknown section", lineNum);
+        }
     }
 
-    fclose(f);
     log_bi::write("settings: loaded %u global values, %zu profiles",
                   (unsigned)values.size(), profiles.size());
     return Result<void>();
@@ -112,15 +512,18 @@ Result<void> settings_bi::load()
 
 Result<void> settings_bi::save() const
 {
-    std::string path = paths_bi::inDataDir(SETTINGS_FILE);
+    std::wstring path = paths_bi::inDataDirWide(L"settings.ini");
     if (path.empty())
         return Result<void>(std::string("settings: data dir not available"));
 
-    FILE *f = fopen(path.c_str(), "w");
+    std::wstring temporaryPath = std::format(
+        L"{}.tmp.{}.{}", path, (unsigned long)GetCurrentProcessId(),
+        (unsigned long long)GetTickCount64());
+    FILE *f = createExclusiveRegularFile(temporaryPath);
     if (!f)
     {
-        std::string err = std::format("settings: cannot open {} for writing", path);
-        log_bi::write(err.c_str());
+        std::string err = "settings: cannot open the settings file for writing";
+        log_bi::write("%s", err.c_str());
         return Result<void>(err);
     }
 
@@ -137,7 +540,10 @@ Result<void> settings_bi::save() const
     for (std::map<std::string, std::map<std::string, std::string>>::const_iterator pit = profiles.begin();
          pit != profiles.end(); ++pit)
     {
-        fprintf(f, "\n[Profile:%s]\n", pit->first.c_str());
+        if (pit->second.empty())
+            continue;
+        std::string encodedProfile = hexEncode(pit->first);
+        fprintf(f, "\n[ProfileHex:%s]\n", encodedProfile.c_str());
         for (std::map<std::string, std::string>::const_iterator it = pit->second.begin();
              it != pit->second.end(); ++it)
         {
@@ -145,7 +551,29 @@ Result<void> settings_bi::save() const
         }
     }
 
-    fclose(f);
+    bool writeOk = !ferror(f);
+    if (writeOk && fflush(f) != 0)
+        writeOk = false;
+    if (writeOk && _commit(_fileno(f)) != 0)
+        writeOk = false;
+    if (fclose(f) != 0)
+        writeOk = false;
+
+    if (!writeOk)
+    {
+        DeleteFileW(temporaryPath.c_str());
+        return Result<void>(std::string("settings: writing the settings file failed"));
+    }
+
+    if (!MoveFileExW(temporaryPath.c_str(), path.c_str(),
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    {
+        DWORD error = GetLastError();
+        DeleteFileW(temporaryPath.c_str());
+        log_bi::writeErr(error, "settings: replacing the settings file failed");
+        return Result<void>(std::string("settings: replacing the settings file failed"));
+    }
+
     return Result<void>();
 }
 
@@ -170,8 +598,6 @@ std::string settings_bi::getValue(const char *key) const
 void settings_bi::setProfile(const std::string &exe)
 {
     activeProfile = exe;
-    if (!exe.empty() && !hasProfile(exe))
-        profiles[exe] = std::map<std::string, std::string>();
     log_bi::write("settings: active profile '%s'", exe.empty() ? "(global)" : exe.c_str());
 }
 
@@ -186,16 +612,11 @@ bool settings_bi::saveProfile(const std::string &exe, resource_usage_bi *ru,
     if (exe.empty())
         return false;
 
-    std::string prev = activeProfile;
-    activeProfile.clear();
-
     std::map<std::string, std::string> overrides;
 
-    // Collect current state into a temp map
     settings_bi collector;
-    collector.collectFrom(ru, ov, draw, bi);
+    collector.collectStateFrom(ru, ov, draw, bi);
 
-    // Diff against global values to get only overrides
     for (std::map<std::string, std::string>::const_iterator it = collector.values.begin();
          it != collector.values.end(); ++it)
     {
@@ -204,8 +625,10 @@ bool settings_bi::saveProfile(const std::string &exe, resource_usage_bi *ru,
             overrides[it->first] = it->second;
     }
 
-    profiles[exe] = overrides;
-    activeProfile = prev;
+    if (overrides.empty())
+        profiles.erase(exe);
+    else
+        profiles[exe] = overrides;
 
     log_bi::write("settings: saved profile '%s' (%zu overrides)", exe.c_str(), overrides.size());
     return true;
@@ -239,7 +662,11 @@ bool settings_bi::getBool(const char *key, bool def) const
     std::string v = getValue(key);
     if (v.empty())
         return def;
-    return v == "1" || v == "true" || v == "yes";
+    if (v == "1" || v == "true" || v == "yes")
+        return true;
+    if (v == "0" || v == "false" || v == "no")
+        return false;
+    return def;
 }
 
 int settings_bi::getInt(const char *key, int def) const
@@ -247,7 +674,13 @@ int settings_bi::getInt(const char *key, int def) const
     std::string v = getValue(key);
     if (v.empty())
         return def;
-    return atoi(v.c_str());
+
+    int parsed = 0;
+    std::from_chars_result result =
+        std::from_chars(v.data(), v.data() + v.size(), parsed);
+    if (result.ec != std::errc() || result.ptr != v.data() + v.size())
+        return def;
+    return parsed;
 }
 
 float settings_bi::getFloat(const char *key, float def) const
@@ -255,7 +688,16 @@ float settings_bi::getFloat(const char *key, float def) const
     std::string v = getValue(key);
     if (v.empty())
         return def;
-    return (float)atof(v.c_str());
+
+    errno = 0;
+    char *end = NULL;
+    float parsed = strtof(v.c_str(), &end);
+    if (errno == ERANGE || end != v.c_str() + v.size() ||
+        !std::isfinite(parsed))
+    {
+        return def;
+    }
+    return parsed;
 }
 
 std::string settings_bi::getString(const char *key, const std::string &def) const
@@ -335,9 +777,11 @@ void settings_bi::applyTo(resource_usage_bi *ru, overlay_bi *ov,
     if (ov)
     {
         ov->show_on_screen_display = getBool("hud.enabled", ov->show_on_screen_display);
-        ov->margin = getInt("hud.margin", ov->margin);
+        int margin = getInt("hud.margin", ov->margin);
+        ov->margin = std::clamp(margin, 0, 200);
         ov->setScale(getInt("hud.scale", ov->getScale()));
-        ov->overlayAlpha = getInt("hud.alpha", ov->overlayAlpha);
+        int alpha = getInt("hud.alpha", ov->overlayAlpha);
+        ov->overlayAlpha = std::clamp(alpha, 0, 255);
         ov->autoHideOverlay = getBool("hud.autoHide", ov->autoHideOverlay);
         ov->clickable = getBool("hud.clickable", ov->clickable);
 
@@ -367,7 +811,9 @@ void settings_bi::applyTo(resource_usage_bi *ru, overlay_bi *ov,
         ov->hud.showDisk = getBool("hud.disk", ov->hud.showDisk);
 
         std::string orderStr = getString("hud.metricOrder", "");
-        ov->hud.metricOrder.clear();
+        std::vector<int> parsedOrder;
+        bool orderValid = true;
+        bool seen[HUD_M_COUNT] = {};
         if (!orderStr.empty())
         {
             size_t pos = 0;
@@ -376,18 +822,35 @@ void settings_bi::applyTo(resource_usage_bi *ru, overlay_bi *ov,
                 size_t comma = orderStr.find(',', pos);
                 std::string token = (comma == std::string::npos)
                     ? orderStr.substr(pos) : orderStr.substr(pos, comma - pos);
-                if (!token.empty())
+                trim(token);
+                int id = -1;
+                std::from_chars_result parsed = std::from_chars(
+                    token.data(), token.data() + token.size(), id);
+                if (token.empty() || parsed.ec != std::errc() ||
+                    parsed.ptr != token.data() + token.size() ||
+                    id < 0 || id >= HUD_M_COUNT || seen[id])
                 {
-                    int id = std::stoi(token);
-                    if (id >= 0 && id < HUD_M_COUNT)
-                        ov->hud.metricOrder.push_back(id);
+                    orderValid = false;
+                    break;
                 }
-                if (comma == std::string::npos) break;
+                seen[id] = true;
+                parsedOrder.push_back(id);
+                if (comma == std::string::npos)
+                    break;
                 pos = comma + 1;
             }
         }
+        if (!orderStr.empty() &&
+            (!orderValid || parsedOrder.size() != HUD_M_COUNT))
+        {
+            log_bi::write("settings: ignoring invalid hud.metricOrder");
+            parsedOrder.clear();
+        }
+        ov->hud.metricOrder.swap(parsedOrder);
 
-        ov->graphHeightMultiplier = getFloat("hud.graphHeight", ov->graphHeightMultiplier);
+        float graphHeight =
+            getFloat("hud.graphHeight", ov->graphHeightMultiplier);
+        ov->graphHeightMultiplier = std::clamp(graphHeight, 0.5f, 3.0f);
     }
 
     if (draw)
@@ -405,9 +868,9 @@ void settings_bi::applyTo(resource_usage_bi *ru, overlay_bi *ov,
 
         const D2D1_COLOR_F &cur = draw->getAccentColor();
         D2D1_COLOR_F accent;
-        accent.r = getFloat("ui.accent.r", cur.r);
-        accent.g = getFloat("ui.accent.g", cur.g);
-        accent.b = getFloat("ui.accent.b", cur.b);
+        accent.r = std::clamp(getFloat("ui.accent.r", cur.r), 0.0f, 1.0f);
+        accent.g = std::clamp(getFloat("ui.accent.g", cur.g), 0.0f, 1.0f);
+        accent.b = std::clamp(getFloat("ui.accent.b", cur.b), 0.0f, 1.0f);
         accent.a = 1.0f;
         draw->setAccentColor(accent);
     }
@@ -415,6 +878,30 @@ void settings_bi::applyTo(resource_usage_bi *ru, overlay_bi *ov,
 
 void settings_bi::collectFrom(const resource_usage_bi *ru, const overlay_bi *ov,
                               const draw_batteryinfo_bi *draw, const batteryinfo_bi *bi)
+{
+    settings_bi collector;
+    collector.collectStateFrom(ru, ov, draw, bi);
+
+    const std::map<std::string, std::string> *overrides = NULL;
+    if (!activeProfile.empty())
+    {
+        std::map<std::string, std::map<std::string, std::string>>::const_iterator it =
+            profiles.find(activeProfile);
+        if (it != profiles.end())
+            overrides = &it->second;
+    }
+
+    for (std::map<std::string, std::string>::const_iterator it = collector.values.begin();
+         it != collector.values.end(); ++it)
+    {
+        if (!overrides || overrides->find(it->first) == overrides->end())
+            values[it->first] = it->second;
+    }
+}
+
+void settings_bi::collectStateFrom(const resource_usage_bi *ru, const overlay_bi *ov,
+                                   const draw_batteryinfo_bi *draw,
+                                   const batteryinfo_bi *bi)
 {
     if (bi)
     {
@@ -511,110 +998,129 @@ void settings_bi::collectFrom(const resource_usage_bi *ru, const overlay_bi *ov,
     }
 }
 
-bool settings_bi::exportJson(const char *path) const
+bool settings_bi::exportJson(const wchar_t *path) const
 {
-    FILE *f = fopen(path, "w");
+    if (!path || !*path)
+        return false;
+
+    FILE *f = _wfopen(path, L"wb");
     if (!f)
         return false;
 
     fprintf(f, "{\n");
     bool first = true;
-    for (std::map<std::string, std::string>::const_iterator it = values.begin();
-         it != values.end(); ++it)
-    {
+    const auto writeEntry = [&](const std::string &key, const std::string &value) {
         if (!first)
             fprintf(f, ",\n");
         first = false;
+        fputs("  ", f);
+        writeJsonString(f, key);
+        fputs(": ", f);
+        writeJsonString(f, value);
+    };
 
-        std::string escaped;
-        for (size_t i = 0; i < it->second.size(); ++i)
+    for (std::map<std::string, std::string>::const_iterator it = values.begin();
+         it != values.end(); ++it)
+        writeEntry(it->first, it->second);
+
+    for (std::map<std::string, std::map<std::string, std::string>>::const_iterator pit =
+             profiles.begin();
+         pit != profiles.end(); ++pit)
+    {
+        for (std::map<std::string, std::string>::const_iterator it = pit->second.begin();
+             it != pit->second.end(); ++it)
         {
-            char c = it->second[i];
-            if (c == '"' || c == '\\')
-            {
-                escaped += '\\';
-                escaped += c;
-            }
-            else if (c == '\n')
-                escaped += "\\n";
-            else
-                escaped += c;
+            writeEntry(std::string(PROFILE_JSON_PREFIX) + pit->first + ":" + it->first,
+                       it->second);
         }
-
-        fprintf(f, "  \"%s\": \"%s\"", it->first.c_str(), escaped.c_str());
     }
     fprintf(f, "\n}\n");
 
-    fclose(f);
-    return true;
+    bool ok = !ferror(f);
+    if (fclose(f) != 0)
+        ok = false;
+    return ok;
 }
 
-bool settings_bi::importJson(const char *path)
+bool settings_bi::importJson(const wchar_t *path)
 {
-    FILE *f = fopen(path, "r");
+    if (!path || !*path)
+        return false;
+
+    FILE *f = _wfopen(path, L"rb");
     if (!f)
         return false;
 
-    fseek(f, 0, SEEK_END);
+    if (fseek(f, 0, SEEK_END) != 0)
+    {
+        fclose(f);
+        return false;
+    }
     long len = ftell(f);
-    fseek(f, 0, SEEK_SET);
+    if (len < 0 || (size_t)len > MAX_JSON_BYTES ||
+        fseek(f, 0, SEEK_SET) != 0)
+    {
+        fclose(f);
+        return false;
+    }
 
     std::string content((size_t)len, '\0');
-    if (fread(&content[0], 1, (size_t)len, f) != (size_t)len)
+    if (len > 0 && fread(&content[0], 1, (size_t)len, f) != (size_t)len)
     {
         fclose(f);
         return false;
     }
     fclose(f);
 
-    size_t pos = 0;
-    while (pos < content.size())
+    std::map<std::string, std::string> flat;
+    if (!parseFlatJsonObject(content, &flat))
     {
-        size_t kstart = content.find('"', pos);
-        if (kstart == std::string::npos)
-            break;
-
-        size_t kend = content.find('"', kstart + 1);
-        if (kend == std::string::npos)
-            break;
-
-        std::string key = content.substr(kstart + 1, kend - kstart - 1);
-
-        size_t vstart = content.find('"', kend + 1);
-        if (vstart == std::string::npos)
-            break;
-
-        size_t vend = vstart + 1;
-        while (vend < content.size() && content[vend] != '"')
-        {
-            if (content[vend] == '\\')
-                ++vend;
-            ++vend;
-        }
-        if (vend >= content.size())
-            break;
-
-        std::string value;
-        for (size_t i = vstart + 1; i < vend; ++i)
-        {
-            if (content[i] == '\\' && i + 1 < vend)
-            {
-                if (content[i + 1] == 'n')
-                    value += '\n';
-                else
-                    value += content[i + 1];
-                ++i;
-            }
-            else
-            {
-                value += content[i];
-            }
-        }
-
-        values[key] = value;
-        pos = vend + 1;
+        log_bi::write("settings: rejected malformed JSON import");
+        return false;
     }
 
-    log_bi::write("settings: imported %u values from %s", (unsigned)values.size(), path);
+    std::map<std::string, std::string> importedValues;
+    std::map<std::string, std::map<std::string, std::string>> importedProfiles;
+    const size_t prefixLen = strlen(PROFILE_JSON_PREFIX);
+
+    for (std::map<std::string, std::string>::const_iterator it = flat.begin();
+         it != flat.end(); ++it)
+    {
+        if (it->first.compare(0, prefixLen, PROFILE_JSON_PREFIX) != 0)
+        {
+            if (!isIniSafeKey(it->first) || !isIniSafeValue(it->second))
+            {
+                log_bi::write("settings: rejected unsafe key or value in JSON import");
+                return false;
+            }
+            importedValues[it->first] = it->second;
+            continue;
+        }
+
+        size_t separator = it->first.find(':', prefixLen);
+        if (separator == std::string::npos ||
+            separator == prefixLen || separator + 1 >= it->first.size())
+        {
+            log_bi::write("settings: rejected malformed profile key in JSON import");
+            return false;
+        }
+
+        std::string profile = it->first.substr(prefixLen, separator - prefixLen);
+        std::string key = it->first.substr(separator + 1);
+        if (!isIniSafeProfile(profile) || !isIniSafeKey(key) ||
+            !isIniSafeValue(it->second))
+        {
+            log_bi::write("settings: rejected unsafe profile data in JSON import");
+            return false;
+        }
+        importedProfiles[profile][key] = it->second;
+    }
+
+    values.swap(importedValues);
+    profiles.swap(importedProfiles);
+    activeProfile.clear();
+
+    log_bi::write("settings: imported %u global values, %zu profiles",
+                  (unsigned)values.size(), profiles.size());
     return true;
 }

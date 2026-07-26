@@ -1,6 +1,6 @@
 # Privacy Policy for Kestrel
 
-**Last updated: 22 July 2026**
+**Last updated: 26 July 2026**
 
 Kestrel is a battery, system and frame-time overlay for Windows, published by
 **semiloker**. This policy explains exactly what the application reads, what it
@@ -38,12 +38,13 @@ values are simply unavailable and are shown as dashes.
 
 ## 2. Data Kestrel stores on your computer
 
-Kestrel is a portable application. It writes two files, both inside your own
+Kestrel is a portable application. Its runtime data is stored inside your own
 user profile at `%APPDATA%\Kestrel\`:
 
 - **`settings.ini`** — your preferences: which metrics are shown, overlay
-  position and margin, accent colour, theme, and startup behaviour. It contains
-  no personal information.
+  position and margin, accent colour, theme, startup behaviour, and any
+  per-application profiles you explicitly save. A profile includes the
+  executable name used to select it.
 - **`kestrel.log`** — a diagnostic log. It may record hardware identifiers such
   as your CPU model, GPU adapter name, and battery chemistry, together with
   error messages. It exists so that you can see why a value could not be read.
@@ -52,8 +53,8 @@ user profile at `%APPDATA%\Kestrel\`:
   contain performance measurements and the name of the program you recorded.
   Nothing is uploaded; delete the folder at any time.
 
-Both files stay on your computer. Neither is transmitted anywhere. You may
-delete either file at any time; deleting `settings.ini` resets Kestrel to its
+All of these files stay on your computer. None is transmitted anywhere. You may
+delete any of them at any time; deleting `settings.ini` resets Kestrel to its
 defaults.
 
 If you enable **Start with Windows**, Kestrel creates a Windows Task Scheduler
@@ -72,8 +73,8 @@ updates on its own and never downloads anything in the background.
 When you press those buttons, Kestrel makes an ordinary HTTPS request to:
 
 - `api.github.com` — to read the latest published release number
-- `objects.githubusercontent.com` (or another GitHub download host) — to
-  download the new program file
+- GitHub's allowlisted release download hosts — to download the program and its
+  matching SHA-256 checksum file
 
 As with any web request, GitHub receives your IP address and the request's
 user-agent string (`Kestrel-Updater`). Kestrel sends **no** identifiers, no
@@ -110,9 +111,19 @@ Kestrel runs as a normal user process and installs no kernel driver, service, or
 background agent. It requests administrator rights only when you explicitly ask
 for frame timing, and only to open an ETW trace session.
 
-Update downloads are made over HTTPS. Before installing an update, Kestrel
-verifies that the downloaded file is a valid Windows executable and keeps your
-previous version as `kestrel.old.exe` so that you can roll back.
+Update downloads are made over HTTPS through a fixed host allowlist and a
+bounded, manually validated redirect chain. Before installing an update,
+Kestrel verifies the exact release asset against its SHA-256 checksum and also
+validates Authenticode when the release is signed. It verifies the installed
+path again immediately before starting it and keeps your previous version as
+`kestrel.old.exe` so that you can roll back.
+
+An elevated Kestrel process refuses to update or roll back from a directory
+that the linked standard user can replace or redirect.
+
+When elevated autostart is enabled, Kestrel accepts only an executable in a
+protected, non-reparse directory. The scheduled task is registered with a
+restricted access-control list and exact command-line arguments.
 
 ## 8. Changes to this policy
 

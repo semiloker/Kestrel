@@ -33,6 +33,7 @@ private:
 
     HANDLE map_ = NULL;
     const BYTE *view_ = NULL;
+    size_t viewSize_ = 0;
     DWORD lastOpenAttempt_ = 0;
     bool logged_ = false;
 };

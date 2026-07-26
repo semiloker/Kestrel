@@ -6,7 +6,10 @@
 class init_d2d1_bi
 {
 public:
+    init_d2d1_bi() = default;
     ~init_d2d1_bi();
+    init_d2d1_bi(const init_d2d1_bi &) = delete;
+    init_d2d1_bi &operator=(const init_d2d1_bi &) = delete;
 
     void InitDirect2D();
     ID2D1HwndRenderTarget *GetOrCreateRenderTarget(HWND hwnd);

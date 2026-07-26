@@ -1,6 +1,7 @@
 #ifndef CAPTURE_MANAGER_BI_H
 #define CAPTURE_MANAGER_BI_H
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -10,12 +11,17 @@ class capture_manager_bi
 {
 public:
     capture_manager_bi();
-    ~capture_manager_bi() = default;
+    ~capture_manager_bi();
+    capture_manager_bi(const capture_manager_bi &) = delete;
+    capture_manager_bi &operator=(const capture_manager_bi &) = delete;
 
-    void toggle(const std::string &processName);
+    void toggle(const std::string &processName, DWORD processId);
     bool active() const { return cap_.active(); }
+    bool finalizing();
 
-    void stopForRollback();
+    void stopActive();
+    void pollFinalize();
+    void waitForFinalize();
     void loadHistory();
 
     capture_bi &getCapture() { return cap_; }
@@ -35,6 +41,16 @@ private:
     bool haveLastCapture = false;
     std::vector<capture_bi::summary_bi> captureHistory;
     bool captureHistoryLoaded = false;
+
+    void beginFinalize();
+    static DWORD WINAPI finalizeEntry(LPVOID param);
+
+    CRITICAL_SECTION finalizeLock;
+    HANDLE finalizeThread = NULL;
+    std::unique_ptr<capture_bi> finalizeCapture;
+    capture_bi::summary_bi pendingSummary;
+    bool pendingReady = false;
+    bool pendingSucceeded = false;
 };
 
 #endif

@@ -13,6 +13,7 @@ namespace autostart_bi
     };
 
     bool isElevated();
+    bool executablePathProtected();
 
     mode_bi current();
 

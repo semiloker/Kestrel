@@ -1,6 +1,7 @@
 #include "etw_bi.h"
 #include "logger_bi.h"
 #include "app_identity_bi.h"
+#include "paths_bi.h"
 
 #include <evntrace.h>
 #include <evntcons.h>
@@ -88,6 +89,7 @@ etw_bi::etw_bi()
       frameOwnerPid(0)
 {
     InitializeCriticalSection(&lock);
+    InitializeCriticalSection(&lifecycleLock);
 
     memset(sources, 0, sizeof(sources));
     memset(frameRing, 0, sizeof(frameRing));
@@ -139,7 +141,7 @@ etw_bi::etw_bi()
     sources[n].name = "DxgKrnl Flip";
     ++n;
 
-    sourceCount = n;
+    sourceCount.store(n, std::memory_order_release);
 
     HANDLE token = NULL;
     if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
@@ -157,6 +159,7 @@ etw_bi::etw_bi()
 etw_bi::~etw_bi()
 {
     stop();
+    DeleteCriticalSection(&lifecycleLock);
     DeleteCriticalSection(&lock);
 }
 
@@ -203,23 +206,28 @@ std::string etw_bi::processName(DWORD processId)
     if (!proc)
         return std::string("<access denied>");
 
-    char path[MAX_PATH] = {0};
-    DWORD size = MAX_PATH;
     std::string result;
-
-    if (QueryFullProcessImageNameA(proc, 0, path, &size) && size > 0)
+    std::vector<wchar_t> path(512);
+    while (path.size() <= 32768)
     {
-        std::string full(path, size);
-        size_t slash = full.find_last_of('\\');
-        result = (slash == std::string::npos) ? full : full.substr(slash + 1);
-    }
-    else
-    {
-        result = "<unknown>";
+        DWORD size = (DWORD)path.size();
+        if (QueryFullProcessImageNameW(proc, 0, &path[0], &size) && size > 0)
+        {
+            std::wstring full(&path[0], size);
+            size_t slash = full.find_last_of(L"\\/");
+            std::wstring name = slash == std::wstring::npos
+                ? full
+                : full.substr(slash + 1);
+            result = paths_bi::wideToUtf8(name);
+            break;
+        }
+        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+            break;
+        path.resize(path.size() * 2);
     }
 
     CloseHandle(proc);
-    return result;
+    return result.empty() ? std::string("<unknown>") : result;
 }
 
 etw_bi::api_bi etw_bi::detectApi(DWORD processId)
@@ -305,112 +313,85 @@ const etw_bi::proc_ident_bi &etw_bi::resolveProcess(DWORD pid)
     return idents.insert(std::make_pair(pid, ident)).first->second;
 }
 
+bool etw_bi::appendSourceLocked(provider_bi provider, unsigned eventId, const char *name)
+{
+    int count = sourceCount.load(std::memory_order_relaxed);
+    for (int i = 0; i < count; ++i)
+    {
+        if (sources[i].provider == provider &&
+            sources[i].eventId == eventId)
+        {
+            return false;
+        }
+    }
+
+    if (count >= ETW_MAX_SOURCES)
+        return false;
+
+    sources[count].provider = provider;
+    sources[count].eventId = eventId;
+    sources[count].name = name;
+
+    // The callback reads only entries below this count. Release publication
+    // keeps its hot path lock-free while making the new immutable entry visible.
+    sourceCount.store(count + 1, std::memory_order_release);
+    return true;
+}
+
 void etw_bi::setFallbackSource(provider_bi provider, unsigned eventId)
 {
     if (eventId == 0)
         return;
 
     EnterCriticalSection(&lock);
-
-    if (sourceCount < ETW_MAX_SOURCES)
-    {
-        sources[sourceCount].provider = provider;
-        sources[sourceCount].eventId = eventId;
-        sources[sourceCount].name = "configured fallback";
-        ++sourceCount;
-    }
-
+    bool added = appendSourceLocked(provider, eventId, "configured fallback");
     LeaveCriticalSection(&lock);
 
-    log_bi::write("etw: added fallback present source %s event %u",
-                  providerName(provider), eventId);
+    if (added)
+    {
+        log_bi::write("etw: added fallback present source %s event %u",
+                      providerName(provider), eventId);
+    }
 }
 
 void etw_bi::autoConfigForApi(api_bi api)
 {
-    if (api == configuredApi || api == API_NONE)
+    if (api == API_NONE)
         return;
 
-    configuredApi = api;
-
     EnterCriticalSection(&lock);
+
+    if (api == configuredApi)
+    {
+        LeaveCriticalSection(&lock);
+        return;
+    }
+
+    configuredApi = api;
+    bool added = false;
 
     switch (api)
     {
     case API_D3D9:
-        if (sourceCount < ETW_MAX_SOURCES)
-        {
-            sources[sourceCount].provider = PROV_D3D9;
-            sources[sourceCount].eventId = 1;
-            sources[sourceCount].name = "D3D9 Present";
-            ++sourceCount;
-        }
+        added |= appendSourceLocked(PROV_D3D9, 1, "D3D9 Present");
         break;
 
     case API_D3D11:
     case API_D3D12:
-        if (sourceCount < ETW_MAX_SOURCES)
-        {
-            sources[sourceCount].provider = PROV_DXGI;
-            sources[sourceCount].eventId = 42;
-            sources[sourceCount].name = "DXGI Present";
-            ++sourceCount;
-        }
-        if (sourceCount < ETW_MAX_SOURCES)
-        {
-            sources[sourceCount].provider = PROV_DXGI;
-            sources[sourceCount].eventId = 144;
-            sources[sourceCount].name = "DXGI MPO Present";
-            ++sourceCount;
-        }
+        added |= appendSourceLocked(PROV_DXGI, 42, "DXGI Present");
+        added |= appendSourceLocked(PROV_DXGI, 144, "DXGI MPO Present");
         break;
 
     case API_OPENGL:
-        if (sourceCount < ETW_MAX_SOURCES)
-        {
-            sources[sourceCount].provider = PROV_DXGI;
-            sources[sourceCount].eventId = 42;
-            sources[sourceCount].name = "OpenGL DXGI Present";
-            ++sourceCount;
-        }
-        if (sourceCount < ETW_MAX_SOURCES)
-        {
-            sources[sourceCount].provider = PROV_DXGI;
-            sources[sourceCount].eventId = 144;
-            sources[sourceCount].name = "OpenGL DXGI MPO";
-            ++sourceCount;
-        }
-        if (sourceCount < ETW_MAX_SOURCES)
-        {
-            sources[sourceCount].provider = PROV_DXGKRNL;
-            sources[sourceCount].eventId = 166;
-            sources[sourceCount].name = "OpenGL Blit";
-            ++sourceCount;
-        }
+        added |= appendSourceLocked(PROV_DXGI, 42, "OpenGL DXGI Present");
+        added |= appendSourceLocked(PROV_DXGI, 144, "OpenGL DXGI MPO");
+        added |= appendSourceLocked(PROV_DXGKRNL, 166, "OpenGL Blit");
         break;
 
     case API_VULKAN:
-        if (sourceCount < ETW_MAX_SOURCES)
-        {
-            sources[sourceCount].provider = PROV_DXGI;
-            sources[sourceCount].eventId = 42;
-            sources[sourceCount].name = "Vulkan DXGI Present";
-            ++sourceCount;
-        }
-        if (sourceCount < ETW_MAX_SOURCES)
-        {
-            sources[sourceCount].provider = PROV_DXGI;
-            sources[sourceCount].eventId = 144;
-            sources[sourceCount].name = "Vulkan DXGI MPO";
-            ++sourceCount;
-        }
-        if (sourceCount < ETW_MAX_SOURCES)
-        {
-            sources[sourceCount].provider = PROV_DXGKRNL;
-            sources[sourceCount].eventId = 168;
-            sources[sourceCount].name = "Vulkan Flip";
-            ++sourceCount;
-        }
+        added |= appendSourceLocked(PROV_DXGI, 42, "Vulkan DXGI Present");
+        added |= appendSourceLocked(PROV_DXGI, 144, "Vulkan DXGI MPO");
+        added |= appendSourceLocked(PROV_DXGKRNL, 168, "Vulkan Flip");
         break;
 
     default:
@@ -419,23 +400,28 @@ void etw_bi::autoConfigForApi(api_bi api)
 
     LeaveCriticalSection(&lock);
 
-    log_bi::write("etw: auto-configured sources for %s", apiName(api));
+    log_bi::write(added
+                      ? "etw: added API-specific sources for %s"
+                      : "etw: using existing sources for %s",
+                  apiName(api));
 }
 
 void etw_bi::setTarget(DWORD processId)
 {
-    targetPid = processId;
+    targetPid.store(processId, std::memory_order_release);
 }
 
 void etw_bi::countEvent(DWORD pid, int providerIndex, unsigned eventId)
 {
-    if (censusStart100ns == 0 || pid != censusPid)
+    if (censusStart100ns.load(std::memory_order_acquire) == 0 ||
+        pid != censusPid.load(std::memory_order_relaxed))
         return;
 
     unsigned key = ((unsigned)providerIndex << 16) | (eventId & 0xFFFF);
 
     EnterCriticalSection(&lock);
-    if (censusStart100ns != 0 && pid == censusPid)
+    if (censusStart100ns.load(std::memory_order_relaxed) != 0 &&
+        pid == censusPid.load(std::memory_order_relaxed))
         ++census[key];
     LeaveCriticalSection(&lock);
 }
@@ -468,7 +454,8 @@ void WINAPI etw_bi::eventCallback(PEVENT_RECORD record)
 
     self->countEvent(pid, providerIndex, id);
 
-    for (int i = 0; i < self->sourceCount; ++i)
+    int count = self->sourceCount.load(std::memory_order_acquire);
+    for (int i = 0; i < count; ++i)
     {
         if (self->sources[i].provider == providerIndex && self->sources[i].eventId == id)
         {
@@ -493,14 +480,15 @@ void etw_bi::onPresent(DWORD pid, int sourceIndex, LONGLONG timestamp100ns)
         s.intervalSum100ns += delta;
         ++s.intervalCount;
 
-        if (pid == targetPid && sourceIndex == reportedSource)
+        if (pid == targetPid.load(std::memory_order_relaxed) &&
+            sourceIndex == reportedSource)
         {
             if (frameOwnerPid != pid)
             {
                 frameOwnerPid = pid;
                 frameWritten = 0;
                 frameDrained = 0;
-                frameLost = 0;
+                frameLost.store(0, std::memory_order_relaxed);
             }
 
             frame_sample_bi &slot = frameRing[frameWritten % ETW_FRAME_RING];
@@ -528,7 +516,7 @@ size_t etw_bi::drainFrames(frame_sample_bi *out, size_t max)
         unsigned long long oldest = frameWritten - ETW_FRAME_RING;
         if (frameDrained < oldest)
         {
-            frameLost += oldest - frameDrained;
+            frameLost.fetch_add(oldest - frameDrained, std::memory_order_relaxed);
             frameDrained = oldest;
         }
     }
@@ -545,18 +533,29 @@ size_t etw_bi::drainFrames(frame_sample_bi *out, size_t max)
     return taken;
 }
 
+void etw_bi::discardFrames()
+{
+    EnterCriticalSection(&lock);
+    frameDrained = frameWritten;
+    LeaveCriticalSection(&lock);
+}
+
 DWORD WINAPI etw_bi::traceThread(LPVOID param)
 {
     etw_bi *self = (etw_bi *)param;
 
-    ULONG status = ProcessTrace(&self->consumerHandle, 1, NULL, NULL);
+    // CloseTrace() may clear the member while ProcessTrace() is unwinding.
+    // Keep the API's input array in worker-owned storage.
+    TRACEHANDLE consumer = self->consumerHandle.load(std::memory_order_acquire);
+    ULONG status = ProcessTrace(&consumer, 1, NULL, NULL);
 
-    if (self->sessionActive)
+    if (self->sessionActive.load(std::memory_order_acquire))
     {
         log_bi::writeErr(status, "etw: ProcessTrace returned while session was still active, "
                                  "restart needed");
-        self->failed = true;
-        self->sessionActive = false;
+        self->failReason.store("ProcessTrace stopped", std::memory_order_release);
+        self->failed.store(true, std::memory_order_release);
+        self->sessionActive.store(false, std::memory_order_release);
     }
 
     return 0;
@@ -564,14 +563,26 @@ DWORD WINAPI etw_bi::traceThread(LPVOID param)
 
 bool etw_bi::start()
 {
-    if (sessionActive)
+    EnterCriticalSection(&lifecycleLock);
+
+    if (sessionActive.load(std::memory_order_acquire))
+    {
+        LeaveCriticalSection(&lifecycleLock);
         return true;
+    }
+
+    // A previous ProcessTrace invocation may have failed between UI ticks.
+    // Reap it before replacing any owned handles.
+    if (thread != NULL || sessionHandle != 0 ||
+        consumerHandle.load(std::memory_order_acquire) != 0)
+        stop();
 
     if (!isElevated)
     {
-        failReason = "needs administrator rights";
+        failReason.store("needs administrator rights", std::memory_order_release);
         log_bi::write("etw: not elevated, frame metrics unavailable. "
                       "Enable 'Start as administrator' in Settings.");
+        LeaveCriticalSection(&lifecycleLock);
         return false;
     }
 
@@ -593,16 +604,19 @@ bool etw_bi::start()
     if (status != ERROR_SUCCESS)
     {
         sessionHandle = 0;
-        failReason = "StartTrace failed";
+        failReason.store("StartTrace failed", std::memory_order_release);
         log_bi::writeErr(status, "etw: StartTraceW failed");
+        LeaveCriticalSection(&lifecycleLock);
         return false;
     }
+
+    bool censusEnabled = deepCensus.load(std::memory_order_acquire);
 
     for (int i = 0; i < PROV_COUNT; ++i)
     {
         ULONGLONG keyword = 0;
 
-        if (!deepCensus)
+        if (!censusEnabled)
         {
             if (i == PROV_DXGI)
                 keyword = DXGI_KEYWORD_PRESENT;
@@ -626,50 +640,64 @@ bool etw_bi::start()
     logfile.EventRecordCallback = eventCallback;
     logfile.Context = this;
 
-    consumerHandle = OpenTraceW(&logfile);
-    if (consumerHandle == (TRACEHANDLE)INVALID_HANDLE_VALUE)
+    TRACEHANDLE openedConsumer = OpenTraceW(&logfile);
+    consumerHandle.store(openedConsumer, std::memory_order_release);
+    if (openedConsumer == (TRACEHANDLE)INVALID_HANDLE_VALUE)
     {
         DWORD err = GetLastError();
         log_bi::writeErr(err, "etw: OpenTraceW failed");
 
         ControlTraceW(sessionHandle, NULL, props, EVENT_TRACE_CONTROL_STOP);
         sessionHandle = 0;
-        consumerHandle = 0;
-        failReason = "OpenTrace failed";
+        consumerHandle.store(0, std::memory_order_release);
+        failReason.store("OpenTrace failed", std::memory_order_release);
+        LeaveCriticalSection(&lifecycleLock);
         return false;
     }
 
-    sessionActive = true;
-    failed = false;
-    failReason = "";
+    failed.store(false, std::memory_order_release);
+    failReason.store("", std::memory_order_release);
+    sessionActive.store(true, std::memory_order_release);
 
     thread = CreateThread(NULL, 0, traceThread, this, 0, NULL);
     if (!thread)
     {
         log_bi::writeErr(GetLastError(), "etw: CreateThread for ProcessTrace failed");
         stop();
-        failReason = "trace thread failed";
+        failReason.store("trace thread failed", std::memory_order_release);
+        LeaveCriticalSection(&lifecycleLock);
         return false;
     }
 
     log_bi::write("etw: session started, %u KB x %u buffers, %d present sources, "
                   "keywords %s",
                   (unsigned)props->BufferSize, (unsigned)props->MaximumBuffers,
-                  sourceCount, deepCensus ? "all (deep census)" : "present only");
+                  sourceCount.load(std::memory_order_acquire),
+                  censusEnabled ? "all (deep census)" : "present only");
+    LeaveCriticalSection(&lifecycleLock);
     return true;
 }
 
 void etw_bi::stop()
 {
-    if (!sessionActive && sessionHandle == 0)
-        return;
+    EnterCriticalSection(&lifecycleLock);
 
-    sessionActive = false;
-
-    if (consumerHandle)
+    if (!sessionActive.load(std::memory_order_acquire) &&
+        sessionHandle == 0 &&
+        consumerHandle.load(std::memory_order_acquire) == 0 &&
+        thread == NULL)
     {
-        CloseTrace(consumerHandle);
-        consumerHandle = 0;
+        LeaveCriticalSection(&lifecycleLock);
+        return;
+    }
+
+    sessionActive.store(false, std::memory_order_release);
+
+    TRACEHANDLE consumer =
+        consumerHandle.exchange(0, std::memory_order_acq_rel);
+    if (consumer)
+    {
+        CloseTrace(consumer);
     }
 
     if (sessionHandle)
@@ -687,19 +715,44 @@ void etw_bi::stop()
 
     if (thread)
     {
-        WaitForSingleObject(thread, 3000);
+        // CloseTrace/ControlTrace unblock ProcessTrace. Object state and locks
+        // remain alive until the callback thread is confirmed to have exited.
+        DWORD waitResult = WaitForSingleObject(thread, INFINITE);
+        bool waitFailureLogged = false;
+        while (waitResult != WAIT_OBJECT_0)
+        {
+            if (!waitFailureLogged)
+            {
+                log_bi::writeErr(GetLastError(),
+                                 "etw: failed to confirm trace thread exit; retrying");
+                waitFailureLogged = true;
+            }
+            Sleep(10);
+            waitResult = WaitForSingleObject(thread, INFINITE);
+        }
+
         CloseHandle(thread);
         thread = NULL;
     }
+
+    LeaveCriticalSection(&lifecycleLock);
 }
 
 void etw_bi::pollHealth(LONGLONG now)
 {
+    EnterCriticalSection(&lifecycleLock);
+
     if (!sessionHandle)
+    {
+        LeaveCriticalSection(&lifecycleLock);
         return;
+    }
 
     if (lastHealth100ns != 0 && (now - lastHealth100ns) < ETW_HEALTH_INTERVAL_100NS)
+    {
+        LeaveCriticalSection(&lifecycleLock);
         return;
+    }
 
     lastHealth100ns = now;
 
@@ -710,18 +763,26 @@ void etw_bi::pollHealth(LONGLONG now)
     props->Wnode.BufferSize = (ULONG)propsSize;
     props->LoggerNameOffset = sizeof(EVENT_TRACE_PROPERTIES);
 
-    if (ControlTraceW(sessionHandle, NULL, props, EVENT_TRACE_CONTROL_QUERY) != ERROR_SUCCESS)
+    ULONG queryStatus =
+        ControlTraceW(sessionHandle, NULL, props, EVENT_TRACE_CONTROL_QUERY);
+    LeaveCriticalSection(&lifecycleLock);
+
+    if (queryStatus != ERROR_SUCCESS)
         return;
 
     if (props->EventsLost != lastEventsLost || props->RealTimeBuffersLost != lastBuffersLost)
     {
+        EnterCriticalSection(&lock);
+        size_t trackedProcesses = procs.size();
+        LeaveCriticalSection(&lock);
+
         log_bi::write("etw health: events lost %lu (+%lu), realtime buffers lost %lu, "
                       "buffers written %lu, tracked processes %u",
                       (unsigned long)props->EventsLost,
                       (unsigned long)(props->EventsLost - lastEventsLost),
                       (unsigned long)props->RealTimeBuffersLost,
                       (unsigned long)props->BuffersWritten,
-                      (unsigned)procs.size());
+                      (unsigned)trackedProcesses);
 
         lastEventsLost = props->EventsLost;
         lastBuffersLost = props->RealTimeBuffersLost;
@@ -731,7 +792,7 @@ void etw_bi::pollHealth(LONGLONG now)
 void etw_bi::dumpCensus(double seconds)
 {
     std::vector<std::pair<unsigned, unsigned> > entries;
-    DWORD pid = censusPid;
+    DWORD pid = censusPid.load(std::memory_order_acquire);
 
     EnterCriticalSection(&lock);
     for (std::map<unsigned, unsigned>::const_iterator it = census.begin();
@@ -777,7 +838,8 @@ bool etw_bi::evaluateProcess(proc_stats_bi &p, LONGLONG now, sample_bi *out, int
 {
     bool any = false;
 
-    for (int i = 0; i < sourceCount; ++i)
+    int count = sourceCount.load(std::memory_order_relaxed);
+    for (int i = 0; i < count; ++i)
     {
         proc_source_bi &s = p.src[i];
 
@@ -818,16 +880,26 @@ bool etw_bi::evaluateProcess(proc_stats_bi &p, LONGLONG now, sample_bi *out, int
 
 etw_bi::sample_bi etw_bi::sample()
 {
+    return sampleInternal(false);
+}
+
+etw_bi::sample_bi etw_bi::sampleTargetOnly()
+{
+    return sampleInternal(true);
+}
+
+etw_bi::sample_bi etw_bi::sampleInternal(bool targetOnly)
+{
     sample_bi result;
 
-    if (!sessionActive)
+    if (!sessionActive.load(std::memory_order_acquire))
         return result;
 
     FILETIME ft;
     GetSystemTimeAsFileTime(&ft);
     LONGLONG now = ((LONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
 
-    DWORD wanted = targetPid;
+    DWORD wanted = targetPid.load(std::memory_order_acquire);
 
     DWORD bestPid = 0;
     int bestSource = -1;
@@ -900,7 +972,7 @@ etw_bi::sample_bi etw_bi::sample()
     for (size_t i = 0; i < unknownPids.size(); ++i)
         resolveProcess(unknownPids[i]);
 
-    if (!result.valid && bestPid != 0)
+    if (!targetOnly && !result.valid && bestPid != 0)
     {
         if (stickyPid != 0 && stickySample.fps * ETW_SWITCH_MARGIN >= bestSample.fps)
         {
@@ -918,7 +990,18 @@ etw_bi::sample_bi etw_bi::sample()
         result.isForeground = false;
     }
 
+    bool reportChanged = false;
+
+    EnterCriticalSection(&lock);
     if (result.pid != reportedPid || chosenSource != reportedSource)
+    {
+        reportedPid = result.pid;
+        reportedSource = chosenSource;
+        reportChanged = true;
+    }
+    LeaveCriticalSection(&lock);
+
+    if (reportChanged)
     {
         if (result.valid)
         {
@@ -931,21 +1014,19 @@ etw_bi::sample_bi etw_bi::sample()
         {
             log_bi::write("etw: no process is presenting frames");
         }
-
-        reportedPid = result.pid;
-        reportedSource = chosenSource;
     }
 
     pollHealth(now);
 
-    if (censusStart100ns != 0)
+    LONGLONG censusStarted = censusStart100ns.load(std::memory_order_acquire);
+    if (censusStarted != 0)
     {
-        if (now - censusStart100ns >= ETW_CENSUS_WINDOW_100NS)
+        if (now - censusStarted >= ETW_CENSUS_WINDOW_100NS)
         {
-            double seconds = (double)(now - censusStart100ns) / 10000000.0;
+            double seconds = (double)(now - censusStarted) / 10000000.0;
 
             EnterCriticalSection(&lock);
-            censusStart100ns = 0;
+            censusStart100ns.store(0, std::memory_order_release);
             LeaveCriticalSection(&lock);
 
             dumpCensus(seconds);
@@ -962,8 +1043,8 @@ etw_bi::sample_bi etw_bi::sample()
         {
             EnterCriticalSection(&lock);
             census.clear();
-            censusPid = wanted;
-            censusStart100ns = now;
+            censusPid.store(wanted, std::memory_order_relaxed);
+            censusStart100ns.store(now, std::memory_order_release);
             ++censusRuns;
             LeaveCriticalSection(&lock);
 

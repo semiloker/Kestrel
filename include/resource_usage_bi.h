@@ -2,6 +2,7 @@
 #define RESOURCE_USAGE_BI_H
 
 #include <string>
+#include <atomic>
 #include <iostream>
 #include <iomanip>
 #include <sstream>
@@ -28,27 +29,50 @@ class resource_usage_bi : public IResourceUsage
 public:
     resource_usage_bi()
     {
-        CoInitializeEx(NULL, COINIT_MULTITHREADED);
+        InitializeCriticalSection(&publishLock);
+        publishLockReady = true;
+        InitializeCriticalSection(&sampleLock);
+        sampleLockReady = true;
+        InitializeCriticalSection(&samplerLifecycleLock);
+        samplerLifecycleLockReady = true;
+
         initCpuInfo();
         initGpuInfo();
+        pubCpu = cpuInfo;
+        pubRam = ramInfo;
+        pubGpu = gpuInfo;
+        pubAdapters = adapters;
+        pubDisks = disksInfo;
+        pubNetwork = networkInfo;
+        samplerConfig = captureSamplerConfig();
 
         start_As_Admin = isStartAsAdminEnabled();
         start_With_Windows = isStartWithWindowsEnabled();
-
-        InitializeCriticalSection(&publishLock);
-        publishLockReady = true;
     }
 
     ~resource_usage_bi()
     {
         stopSampler();
+        cleanup();
 
         if (publishLockReady)
         {
             DeleteCriticalSection(&publishLock);
             publishLockReady = false;
         }
+        if (sampleLockReady)
+        {
+            DeleteCriticalSection(&sampleLock);
+            sampleLockReady = false;
+        }
+        if (samplerLifecycleLockReady)
+        {
+            DeleteCriticalSection(&samplerLifecycleLock);
+            samplerLifecycleLockReady = false;
+        }
     }
+    resource_usage_bi(const resource_usage_bi &) = delete;
+    resource_usage_bi &operator=(const resource_usage_bi &) = delete;
 
     bool isStartWithWindowsEnabled() override;
     bool enableStartWithWindows() override;
@@ -93,32 +117,8 @@ public:
     bool updateDisk() override;
     bool updateNetwork() override;
 
-    bool updateAll() override
-    {
-        bool success = true;
-        success &= updateRam();
-        success &= collectShared();
-        success &= updateCpu();
-        success &= updateGpu();
-        updateCpuPower();
-        updateTemps();
-        success &= updateDisk();
-        success &= updateNetwork();
-        return success;
-    }
-
-    bool updateHudSample() override
-    {
-        if (!collectShared())
-            return false;
-
-        bool success = true;
-        success &= updateCpu();
-        updateCpuPower();
-        updateTemps();
-        updateGpuMemory();
-        return success;
-    }
+    bool updateAll() override;
+    bool updateHudSample() override;
 
     void cleanup() override;
 
@@ -126,19 +126,53 @@ public:
     void stopSampler() override;
     void setSamplerInterval(int intervalMs) override;
     void setSamplerTarget(DWORD pid) override;
-    int samplerInterval() const override { return (int)samplerIntervalMs; }
+    int samplerInterval() const override
+    {
+        return (int)samplerIntervalMs.load(std::memory_order_acquire);
+    }
 
     void readSnapshot(CpuInfo *cpu, RamInfo *ram, GpuInfo *gpu,
                       double *gpuBusyMs, bool *gpuBusyValid,
                       std::vector<AdapterInfo> *adaptersOut = nullptr) override;
 
 private:
+    struct sampler_config_bi
+    {
+        int memUnit = MEM_UNIT_AUTO;
+        bool showCpuCores = false;
+        bool showRamTotalPhys = true;
+        bool showRamAvailPhys = false;
+        bool showRamTotalPageFile = false;
+        bool showRamAvailPageFile = false;
+        bool showRamTotalVirtual = false;
+        bool showRamAvailVirtual = false;
+        bool showRamAvailExtendedVirtual = false;
+    };
+
     static DWORD WINAPI samplerEntry(LPVOID param);
     void samplerLoop();
-    void publishSample(double gpuBusyMs, bool gpuBusyValid);
+    void publishSample(const CpuInfo &cpu, const RamInfo &ram, const GpuInfo &gpu,
+                       const std::vector<AdapterInfo> &sampleAdapters,
+                       const std::vector<DiskInfo> &sampleDisks,
+                       const std::vector<NetworkInfo> &sampleNetwork,
+                       double gpuBusyMs, bool gpuBusyValid);
+    sampler_config_bi captureSamplerConfig() const;
+
+    bool updateRamInto(RamInfo &ram, const sampler_config_bi &config);
+    bool updateCpuInto(CpuInfo &cpu, bool showCores);
+    bool updateGpuMemoryInto(GpuInfo &gpu, std::vector<AdapterInfo> &sampleAdapters);
+    bool updateCpuPowerInto(CpuInfo &cpu, GpuInfo &gpu);
+    bool updateGpuTimeInto(DWORD pid, double *busyMsOut, GpuInfo &gpu);
+    bool updateTempsInto(CpuInfo &cpu, GpuInfo &gpu);
+    bool updateDiskInto(std::vector<DiskInfo> &disks);
+    bool updateNetworkInto(std::vector<NetworkInfo> &network);
 
     CRITICAL_SECTION publishLock;
     bool publishLockReady = false;
+    CRITICAL_SECTION sampleLock;
+    bool sampleLockReady = false;
+    CRITICAL_SECTION samplerLifecycleLock;
+    bool samplerLifecycleLockReady = false;
 
     CpuInfo pubCpu;
     RamInfo pubRam;
@@ -146,19 +180,22 @@ private:
     double pubGpuBusyMs = 0.0;
     bool pubGpuBusyValid = false;
     std::vector<AdapterInfo> pubAdapters;
+    std::vector<DiskInfo> pubDisks;
+    std::vector<NetworkInfo> pubNetwork;
+    sampler_config_bi samplerConfig;
 
     HANDLE samplerThread = NULL;
     HANDLE samplerStop = NULL;
-    volatile LONG samplerIntervalMs = 200;
-    volatile LONG samplerTargetPid = 0;
+    std::atomic<LONG> samplerIntervalMs{200};
+    std::atomic<DWORD> samplerTargetPid{0};
+
+    bool cleanupDone = false;
 
     bool openSharedQuery();
     bool collectShared();
 
-    // Temperature sources. The thermal-zone query is kept apart from
-    // sharedQuery because updateTemps() runs on the UI thread while the shared
-    // query belongs to the sampler thread, and a PDH query is not safe to
-    // collect from two threads at once.
+    // Temperature sources are sampled by the worker. Public update wrappers
+    // serialize access through sampleLock so the PDH queries stay single-owner.
     bool openTempQuery();
     bool readThermalZonePdh(double *celsiusOut);
     bool readThermalZoneWmi(double *celsiusOut);

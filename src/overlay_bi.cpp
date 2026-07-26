@@ -131,6 +131,16 @@ void overlay_bi::UpdatePosition()
     Render();
 }
 
+void overlay_bi::setTargetWindow(HWND target)
+{
+    if (!target || !IsWindow(target))
+        return;
+
+    HMONITOR monitor = MonitorFromWindow(target, MONITOR_DEFAULTTONEAREST);
+    if (monitor)
+        targetMonitor = monitor;
+}
+
 const D2D1_COLOR_F &overlay_bi::resolveColor(hud_color_bi c) const
 {
     switch (c)
@@ -774,16 +784,27 @@ void overlay_bi::Render()
 
     GdiFlush();
 
-    int screenW = GetSystemMetrics(SM_CXSCREEN);
-    int screenH = GetSystemMetrics(SM_CYSCREEN);
+    RECT bounds = {
+        0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
+    MONITORINFO monitorInfo = {};
+    monitorInfo.cbSize = sizeof(monitorInfo);
+
+    HMONITOR monitor = targetMonitor;
+    if (!monitor)
+    {
+        POINT origin = {0, 0};
+        monitor = MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY);
+    }
+    if (monitor && GetMonitorInfoW(monitor, &monitorInfo))
+        bounds = monitorInfo.rcMonitor;
 
     POINT ptDst;
     ptDst.x = (corner == CORNER_TOP_RIGHT || corner == CORNER_BOTTOM_RIGHT)
-                  ? screenW - panelW - margin
-                  : margin;
+                  ? bounds.right - panelW - margin
+                  : bounds.left + margin;
     ptDst.y = (corner == CORNER_BOTTOM_LEFT || corner == CORNER_BOTTOM_RIGHT)
-                  ? screenH - panelH - margin
-                  : margin;
+                  ? bounds.bottom - panelH - margin
+                  : bounds.top + margin;
 
     POINT ptSrc = {0, 0};
     SIZE size = {panelW, panelH};

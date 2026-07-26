@@ -1,6 +1,7 @@
 #include "BatteryInfo.h"
 #include "logger_bi.h"
 
+#include <climits>
 #include <format>
 
 bool batteryinfo_bi::Initialize()
@@ -72,7 +73,7 @@ bool batteryinfo_bi::QueryBatteryCycleCount()
         RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE,
         NULL, EOAC_NONE, NULL);
 
-    if (FAILED(hres))
+    if (FAILED(hres) && hres != RPC_E_TOO_LATE)
     {
         info_static.CycleCount = "Security init failed";
         CoUninitialize();
@@ -129,7 +130,7 @@ bool batteryinfo_bi::QueryBatteryCycleCount()
     SysFreeString(language);
     SysFreeString(query);
 
-    if (FAILED(hres))
+    if (FAILED(hres) || !pEnumerator)
     {
         info_static.CycleCount = "Query failed";
         pSvc->Release();
@@ -141,7 +142,8 @@ bool batteryinfo_bi::QueryBatteryCycleCount()
     IWbemClassObject *pClassObject = nullptr;
     ULONG uReturn = 0;
 
-    if (pEnumerator->Next((LONG)WBEM_INFINITE, 1, &pClassObject, &uReturn) == S_OK)
+    HRESULT nextResult = pEnumerator->Next(2000, 1, &pClassObject, &uReturn);
+    if (nextResult == S_OK && uReturn == 1 && pClassObject)
     {
         VARIANT vtProp;
         VariantInit(&vtProp);
@@ -167,8 +169,10 @@ bool batteryinfo_bi::QueryBatteryCycleCount()
     }
     else
     {
-        info_static.CycleCount = "No data";
-        log_bi::write("cycle count: ROOT\\WMI BatteryCycleCount returned no instances");
+        info_static.CycleCount =
+            nextResult == WBEM_S_TIMEDOUT ? "Timed out" : "No data";
+        log_bi::write("cycle count: ROOT\\WMI BatteryCycleCount returned no data (0x%08lX)",
+                      (unsigned long)nextResult);
     }
 
     pEnumerator->Release();
@@ -311,13 +315,15 @@ bool batteryinfo_bi::QueryBatteryRemaining()
     if (bi.FullChargedCapacity == 0)
         return true;
 
-    LONG rate = (LONG)bs.Rate;
-    int rate_mW = (rate < 0) ? -rate : rate;
+    LONGLONG rate = (LONGLONG)(LONG)bs.Rate;
+    ULONGLONG rate_mW = (rate < 0) ? (ULONGLONG)(-rate) : (ULONGLONG)rate;
     bool rateUsable = info_1s.rateValid && rate_mW > 0;
 
     if (info_1s.discharging && rateUsable)
     {
-        info_10s.minutesToEmpty = (int)(((ULONGLONG)bs.Capacity * 60) / rate_mW);
+        ULONGLONG minutes = ((ULONGLONG)bs.Capacity * 60) / rate_mW;
+        info_10s.minutesToEmpty =
+            minutes <= (ULONGLONG)INT_MAX ? (int)minutes : INT_MAX;
         info_10s.TimeRemaining = std::format("{}h. {}m.",
                                              info_10s.minutesToEmpty / 60,
                                              info_10s.minutesToEmpty % 60);
@@ -337,7 +343,9 @@ bool batteryinfo_bi::QueryBatteryRemaining()
                             ? (bi.FullChargedCapacity - bs.Capacity)
                             : 0;
 
-        info_10s.minutesToFull = (int)(((ULONGLONG)missing * 60) / rate_mW);
+        ULONGLONG minutes = ((ULONGLONG)missing * 60) / rate_mW;
+        info_10s.minutesToFull =
+            minutes <= (ULONGLONG)INT_MAX ? (int)minutes : INT_MAX;
         info_10s.TimeToFullCharge = std::format("{}h. {}m.",
                                                 info_10s.minutesToFull / 60,
                                                 info_10s.minutesToFull % 60);
