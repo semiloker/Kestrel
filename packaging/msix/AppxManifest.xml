@@ -10,7 +10,7 @@
   <Identity
     Name="semiloker.Kestrel"
     Publisher="CN=semiloker"
-    Version="1.4.1.0"
+    Version="1.4.2.0"
     ProcessorArchitecture="x64" />
 
   <Properties>
