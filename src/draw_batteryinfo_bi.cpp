@@ -2400,7 +2400,10 @@ float draw_batteryinfo_bi::drawRunCard(init_dwrite_bi *dw, float L, float R, flo
     float c3 = IX + (colW + 16.0f) * 2.0f;
     float rowY = y + 44.0f;
 
-    statCell(dw, c1, rowY, colW, L"AVERAGE", wfmt(L"%.1f fps", s.avgFps), false);
+    bool haveFrames = s.frames > 0;
+
+    statCell(dw, c1, rowY, colW, L"AVERAGE",
+             haveFrames ? wfmt(L"%.1f fps", s.avgFps) : L"\u2014", !haveFrames);
     statCell(dw, c2, rowY, colW, L"1% LOW",
              s.low1Valid ? wfmt(L"%.1f fps", s.low1Fps) : L"\u2014", !s.low1Valid);
     statCell(dw, c3, rowY, colW, L"0.1% LOW",
@@ -2408,9 +2411,12 @@ float draw_batteryinfo_bi::drawRunCard(init_dwrite_bi *dw, float L, float R, flo
 
     rowY += 52.0f;
 
-    statCell(dw, c1, rowY, colW, L"MEDIAN FRAME", wfmt(L"%.2f ms", s.medianMs), false);
-    statCell(dw, c2, rowY, colW, L"WORST FRAME", wfmt(L"%.1f ms", s.maxMs), false);
-    statCell(dw, c3, rowY, colW, L"STUTTERS", wfmt(L"%u", s.stutters), false);
+    statCell(dw, c1, rowY, colW, L"MEDIAN FRAME",
+             haveFrames ? wfmt(L"%.2f ms", s.medianMs) : L"\u2014", !haveFrames);
+    statCell(dw, c2, rowY, colW, L"WORST FRAME",
+             haveFrames ? wfmt(L"%.1f ms", s.maxMs) : L"\u2014", !haveFrames);
+    statCell(dw, c3, rowY, colW, L"STUTTERS",
+             haveFrames ? wfmt(L"%u", s.stutters) : L"\u2014", !haveFrames);
 
     rowY += 52.0f;
 

@@ -132,3 +132,41 @@ TEST_CASE("capture invalid frames do not advance its last timestamp",
 
     capture.discard();
 }
+
+// Without an elevated ETW trace session, addFrame() is never called, so a
+// run has zero frames for its whole duration. stop() must still keep the
+// power/battery data instead of discarding the entire run.
+TEST_CASE("capture with no frames but real power samples is not discarded",
+          "[capture][stop]")
+{
+    capture_bi capture;
+    capture.start("game.exe", 13);
+    capture.startTime100ns -= 50000000LL; // pretend 5 seconds have elapsed
+
+    capture.power.resize(2);
+    capture.power[0].time100ns = capture.startTime100ns + 10000000LL;
+    capture.power[0].packageW = 10.0;
+    capture.power[0].packageValid = true;
+    capture.power[0].batteryRateW = 0.0;
+    capture.power[0].batteryRateValid = false;
+    capture.power[0].batteryPct = 0.0;
+    capture.power[0].batteryPctValid = false;
+    capture.power[1] = capture.power[0];
+    capture.power[1].time100ns = capture.startTime100ns + 40000000LL;
+
+    capture_bi::summary_bi summary;
+    REQUIRE(capture.stop(&summary));
+    REQUIRE(summary.frames == 0);
+    REQUIRE(summary.seconds > 0.0);
+}
+
+TEST_CASE("capture with neither frames nor power samples is discarded",
+          "[capture][stop]")
+{
+    capture_bi capture;
+    capture.start("game.exe", 14);
+
+    capture_bi::summary_bi summary;
+    REQUIRE_FALSE(capture.stop(&summary));
+    REQUIRE_FALSE(capture.active());
+}

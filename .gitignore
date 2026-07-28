@@ -7,3 +7,5 @@ build/
 build-*/
 *.o
 *.d
+packaging/msix/stage/
+packaging/msix/*.msix

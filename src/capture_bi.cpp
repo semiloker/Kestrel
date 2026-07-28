@@ -549,12 +549,20 @@ bool capture_bi::stop(summary_bi *out)
 
     recording = false;
 
+    // Without an elevated ETW trace session (frame timing needs admin rights),
+    // addFrame() is never called and lastTime100ns never advances past the
+    // start time. Fall back to wall-clock time so a power/battery-only
+    // capture still gets a real duration instead of reading as 0 seconds.
+    if (frames.count() == 0)
+        lastTime100ns = nowFileTime();
+
     summary_bi summary;
     computeSummary(&summary);
 
-    if (summary.frames < 2)
+    if (summary.frames < 2 && power.size() < 2)
     {
-        log_bi::write("capture: discarded, only %u frames", (unsigned)summary.frames);
+        log_bi::write("capture: discarded, only %u frames and %zu power samples",
+                      (unsigned)summary.frames, power.size());
         frames.reset();
         power.clear();
         return false;

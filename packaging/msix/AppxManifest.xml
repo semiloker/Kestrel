@@ -5,17 +5,18 @@
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   IgnorableNamespaces="uap rescap">
 
-  <!-- Publisher MUST exactly match the subject of the signing certificate,
-       e.g. CN=semiloker. Update both here and when you sign. -->
+  <!-- Name/Publisher come from Partner Center > "Kestrel App" (MSIX) product
+       > View product identity. Publisher MUST also match the subject of the
+       signing certificate for local test builds. -->
   <Identity
-    Name="semiloker.Kestrel"
-    Publisher="CN=semiloker"
-    Version="1.4.2.0"
+    Name="ASSLStudio.KestrelApp"
+    Publisher="CN=35C83A06-0225-4530-A088-4C0C0BBBF674"
+    Version="1.4.3.0"
     ProcessorArchitecture="x64" />
 
   <Properties>
-    <DisplayName>Kestrel</DisplayName>
-    <PublisherDisplayName>semiloker</PublisherDisplayName>
+    <DisplayName>Kestrel App</DisplayName>
+    <PublisherDisplayName>AS|SL Studio</PublisherDisplayName>
     <Logo>assets\StoreLogo.png</Logo>
     <Description>Battery, system and frame-time overlay for Windows.</Description>
   </Properties>
