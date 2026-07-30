@@ -3,10 +3,47 @@
 
 #include <windows.h>
 #include <shlobj.h>
+#include <appmodel.h>
 #include <vector>
 
 namespace
 {
+    // A full-trust app launched from an installed MSIX package has its
+    // %APPDATA% (Roaming) file I/O silently redirected by the OS to a
+    // per-package folder under LOCALAPPDATA\Packages\<FamilyName>\LocalCache.
+    // That's transparent to this process's own reads/writes, but Explorer -
+    // opened unpackaged by the "Open folder" button - resolves the logical
+    // %APPDATA%\Kestrel path and finds it empty. Resolve the real physical
+    // folder directly so both this process and Explorer agree on it.
+    std::wstring packagedRoamingBase()
+    {
+        UINT32 length = 0;
+        if (GetCurrentPackageFamilyName(&length, NULL) != ERROR_INSUFFICIENT_BUFFER ||
+            length == 0)
+        {
+            return std::wstring();
+        }
+
+        std::vector<wchar_t> familyName(length);
+        if (GetCurrentPackageFamilyName(&length, &familyName[0]) != ERROR_SUCCESS)
+            return std::wstring();
+
+        PWSTR local = NULL;
+        if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT,
+                                         NULL, &local)) ||
+            !local)
+        {
+            if (local)
+                CoTaskMemFree(local);
+            return std::wstring();
+        }
+
+        std::wstring base = std::wstring(local) + L"\\Packages\\" +
+                             std::wstring(&familyName[0]) + L"\\LocalCache\\Roaming";
+        CoTaskMemFree(local);
+        return base;
+    }
+
     std::wstring g_dataDirWide;
     std::string g_dataDir;
     std::wstring g_exePathWide;
@@ -67,13 +104,19 @@ const std::wstring &paths_bi::dataDirWide()
 
     g_dataDirReady = true;
 
+    std::wstring roamingBase = packagedRoamingBase();
+    bool havePackagedBase = !roamingBase.empty();
+
     PWSTR roaming = NULL;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_DEFAULT,
-                                       NULL, &roaming)) &&
-        roaming)
+    if (havePackagedBase ||
+        (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_DEFAULT,
+                                        NULL, &roaming)) &&
+         roaming))
     {
-        std::wstring dir = std::wstring(roaming) + L"\\" APP_DATA_DIR_WIDE;
-        CoTaskMemFree(roaming);
+        std::wstring dir = (havePackagedBase ? roamingBase : std::wstring(roaming)) +
+                           L"\\" APP_DATA_DIR_WIDE;
+        if (roaming)
+            CoTaskMemFree(roaming);
 
         if (CreateDirectoryW(dir.c_str(), NULL))
         {
