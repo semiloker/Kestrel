@@ -4,8 +4,23 @@
 #include <climits>
 #include <format>
 
-bool batteryinfo_bi::Initialize()
+namespace
 {
+    // ponytail: fixed backoff between recovery attempts. Cheap enough on a
+    // machine with no battery at all (one SetupDi enumeration every 5 s);
+    // make it exponential only if that ever shows up in a profile.
+    const ULONGLONG RECOVER_INTERVAL_MS = 5000;
+}
+
+bool batteryinfo_bi::OpenDevice()
+{
+    if (hBattery != INVALID_HANDLE_VALUE)
+        CloseHandle(hBattery);
+    hBattery = INVALID_HANDLE_VALUE;
+
+    if (hDevInfo != INVALID_HANDLE_VALUE)
+        SetupDiDestroyDeviceInfoList(hDevInfo);
+
     hDevInfo = SetupDiGetClassDevs(&GUID_DEVINTERFACE_BATTERY, NULL, NULL,
                                    DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
 
@@ -37,7 +52,12 @@ bool batteryinfo_bi::Initialize()
                           FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
     free(detail);
 
-    if (hBattery == INVALID_HANDLE_VALUE)
+    return hBattery != INVALID_HANDLE_VALUE;
+}
+
+bool batteryinfo_bi::Initialize()
+{
+    if (!OpenDevice())
         return false;
 
     present = QueryTag() && QueryBatteryInfo() && QueryBatteryStatus() && QueryBatteryRemaining();
@@ -45,6 +65,55 @@ bool batteryinfo_bi::Initialize()
     QueryBatteryCycleCount();
 
     return present;
+}
+
+// Windows invalidates the battery tag across suspend/resume, a driver reload or
+// a battery re-enumeration, and hands out a stale device handle when the whole
+// interface is torn down. Both leave every later IOCTL failing, which used to
+// freeze the readings on their last good values for as long as the app stayed
+// up - the "sitting in the tray all day and the numbers stopped moving" bug.
+bool batteryinfo_bi::Recover()
+{
+    ULONGLONG now = GetTickCount64();
+    if (now - lastRecoverTick < RECOVER_INTERVAL_MS)
+        return false;
+    lastRecoverTick = now;
+
+    bool ok = QueryTag() || (OpenDevice() && QueryTag());
+    if (!ok)
+        return false;
+
+    log_bi::write("battery: re-acquired the device tag after a failed query");
+
+    // Covers the battery that is not enumerated yet when we start at logon:
+    // Initialize() failed, and these are the only values it would have filled.
+    present = true;
+    if (!info_static.cycleCountValid)
+        QueryBatteryCycleCount();
+
+    return true;
+}
+
+static_assert(offsetof(BATTERY_QUERY_INFORMATION, BatteryTag) == 0 &&
+                  offsetof(BATTERY_WAIT_STATUS, BatteryTag) == 0,
+              "TaggedIoctl stamps the tag over the first ULONG of its input");
+
+bool batteryinfo_bi::TaggedIoctl(DWORD code, void *in, DWORD inSize,
+                                 void *out, DWORD outSize)
+{
+    DWORD returned = 0;
+    *(ULONG *)in = tag;
+
+    if (DeviceIoControl(hBattery, code, in, inSize, out, outSize, &returned, NULL))
+        return true;
+
+    if (!Recover())
+        return false;
+
+    *(ULONG *)in = tag;
+    returned = 0;
+    return DeviceIoControl(hBattery, code, in, inSize, out, outSize,
+                           &returned, NULL) != FALSE;
 }
 
 bool batteryinfo_bi::QueryTag()
@@ -186,12 +255,10 @@ bool batteryinfo_bi::QueryBatteryCycleCount()
 bool batteryinfo_bi::QueryBatteryInfo()
 {
     BATTERY_QUERY_INFORMATION bqi = {};
-    bqi.BatteryTag = tag;
     bqi.InformationLevel = BatteryInformation;
 
-    DWORD bytesReturned = 0;
-    if (!DeviceIoControl(hBattery, IOCTL_BATTERY_QUERY_INFORMATION,
-                         &bqi, sizeof(bqi), &bi, sizeof(bi), &bytesReturned, NULL))
+    if (!TaggedIoctl(IOCTL_BATTERY_QUERY_INFORMATION,
+                     &bqi, sizeof(bqi), &bi, sizeof(bi)))
         return false;
 
     info_static.Chemistry = std::string((char *)bi.Chemistry, 4);
@@ -242,11 +309,9 @@ bool batteryinfo_bi::QueryBatteryInfo()
 bool batteryinfo_bi::QueryBatteryStatus()
 {
     BATTERY_WAIT_STATUS bws = {};
-    bws.BatteryTag = tag;
 
-    DWORD bytesReturned = 0;
-    if (!DeviceIoControl(hBattery, IOCTL_BATTERY_QUERY_STATUS,
-                         &bws, sizeof(bws), &bs, sizeof(bs), &bytesReturned, NULL))
+    if (!TaggedIoctl(IOCTL_BATTERY_QUERY_STATUS,
+                     &bws, sizeof(bws), &bs, sizeof(bs)))
         return false;
 
     info_1s.charging = (bs.PowerState & BATTERY_CHARGING) != 0;

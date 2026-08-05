@@ -25,6 +25,12 @@ namespace autostart_bi
 
     bool runTask();
 
+    // Elevation fallback for an executable that does not live in an
+    // administrator-protected directory, where a highest-privilege scheduled
+    // task would be a privilege-escalation hole. Costs one UAC prompt.
+    bool elevationRequested();
+    bool elevateSelf();
+
     bool handleCommandLine(const char *cmdLine, int *exitCode);
 
     extern const char *ARG_INSTALL_TASK;

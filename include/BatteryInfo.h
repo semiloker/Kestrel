@@ -54,6 +54,13 @@ private:
     BATTERY_INFORMATION bi{};
     BATTERY_STATUS bs{};
     ULONG tag;
+    ULONGLONG lastRecoverTick = 0;
+
+    bool OpenDevice();
+    bool Recover();
+    // Both battery IOCTL input structs start with the tag, so one wrapper can
+    // stamp it, retry after a recovery, and keep the callers unchanged.
+    bool TaggedIoctl(DWORD code, void *in, DWORD inSize, void *out, DWORD outSize);
 
 public:
     using bi_struct_static = IBatteryInfo::bi_struct_static;

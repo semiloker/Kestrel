@@ -1,11 +1,11 @@
 {
-    "version": "1.4.2",
+    "version": "1.4.4",
     "description": "Battery, system and frame-time overlay for Windows.",
     "homepage": "https://github.com/semiloker/Kestrel",
     "license": "MIT",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/semiloker/Kestrel/releases/download/v1.4.2/kestrel.exe#/kestrel.exe",
+            "url": "https://github.com/semiloker/Kestrel/releases/download/v1.4.4/kestrel.exe#/kestrel.exe",
             "hash": "0000000000000000000000000000000000000000000000000000000000000000"
         }
     },

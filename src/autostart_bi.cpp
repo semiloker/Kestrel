@@ -23,6 +23,8 @@ namespace
     const wchar_t *RUN_KEY =
         L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
     const wchar_t *RUN_VALUE = L"Kestrel";
+    const wchar_t *APP_KEY = L"SOFTWARE\\" APP_DATA_DIR_WIDE;
+    const wchar_t *ELEVATE_VALUE = L"ElevateOnStart";
 
     const CLSID CLSID_TaskScheduler_bi =
         {0x0f87369f, 0xa4e5, 0x4cfc, {0xbd, 0x3e, 0x73, 0xe6, 0x15, 0x45, 0x72, 0xdd}};
@@ -901,6 +903,32 @@ namespace
 
         return r == ERROR_SUCCESS || r == ERROR_FILE_NOT_FOUND;
     }
+
+    bool setElevationRequested(bool wanted)
+    {
+        HKEY key;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, APP_KEY, 0, NULL,
+                            REG_OPTION_NON_VOLATILE, KEY_SET_VALUE,
+                            NULL, &key, NULL) != ERROR_SUCCESS)
+            return false;
+
+        LONG r;
+        if (wanted)
+        {
+            DWORD one = 1;
+            r = RegSetValueExW(key, ELEVATE_VALUE, 0, REG_DWORD,
+                               reinterpret_cast<const BYTE *>(&one), sizeof(one));
+        }
+        else
+        {
+            r = RegDeleteValueW(key, ELEVATE_VALUE);
+            if (r == ERROR_FILE_NOT_FOUND)
+                r = ERROR_SUCCESS;
+        }
+        RegCloseKey(key);
+
+        return r == ERROR_SUCCESS;
+    }
 }
 
 bool autostart_bi::isElevated()
@@ -924,6 +952,60 @@ bool autostart_bi::executablePathProtected()
 {
     std::wstring path;
     return protectedExecutablePath(&path);
+}
+
+bool autostart_bi::elevationRequested()
+{
+    HKEY key;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, APP_KEY, 0, KEY_READ, &key) != ERROR_SUCCESS)
+        return false;
+
+    DWORD value = 0;
+    DWORD type = 0;
+    DWORD size = sizeof(value);
+    LONG r = RegQueryValueExW(key, ELEVATE_VALUE, NULL, &type,
+                              reinterpret_cast<BYTE *>(&value), &size);
+    RegCloseKey(key);
+
+    return r == ERROR_SUCCESS && type == REG_DWORD && value != 0;
+}
+
+bool autostart_bi::elevateSelf()
+{
+    if (isElevated())
+        return true;
+
+    const std::wstring &exe = paths_bi::exePathWide();
+    if (exe.empty())
+        return false;
+
+    // A task launch is silent; this one always prompts. Keep the tray-only
+    // start when that is how this instance was launched.
+    std::wstring parameters =
+        hasExactCommandArgument(L"--autostart", false) ? L"--autostart" : L"";
+
+    SHELLEXECUTEINFOW sei;
+    ZeroMemory(&sei, sizeof(sei));
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_NOASYNC;
+    sei.lpVerb = L"runas";
+    sei.lpFile = exe.c_str();
+    sei.lpParameters = parameters.empty() ? NULL : parameters.c_str();
+    sei.nShow = SW_SHOWNORMAL;
+
+    if (ShellExecuteExW(&sei))
+    {
+        log_bi::write("elevation: relaunching through UAC");
+        return true;
+    }
+
+    DWORD err = GetLastError();
+    if (err == ERROR_CANCELLED)
+        log_bi::write("elevation: user declined the UAC prompt");
+    else
+        log_bi::writeErr(err, "elevation: ShellExecuteEx(runas) failed");
+
+    return false;
 }
 
 bool autostart_bi::taskExists()
@@ -1051,7 +1133,7 @@ autostart_bi::mode_bi autostart_bi::current()
     if (taskExists() && taskPointsToThisExe())
         return AUTOSTART_ADMIN;
     if (runKeyExists())
-        return AUTOSTART_NORMAL;
+        return elevationRequested() ? AUTOSTART_ADMIN : AUTOSTART_NORMAL;
     return AUTOSTART_OFF;
 }
 
@@ -1061,6 +1143,8 @@ bool autostart_bi::setMode(mode_bi mode)
     {
     case AUTOSTART_OFF:
     {
+        setElevationRequested(false);
+
         bool runKeyRemoved = deleteRunKey();
         bool taskRemoved = true;
 
@@ -1075,6 +1159,8 @@ bool autostart_bi::setMode(mode_bi mode)
     }
 
     case AUTOSTART_NORMAL:
+        setElevationRequested(false);
+
         if (taskExists())
         {
             bool removed = isElevated()
@@ -1089,7 +1175,15 @@ bool autostart_bi::setMode(mode_bi mode)
     {
         std::wstring protectedPath;
         if (!protectedExecutablePath(&protectedPath))
-            return false;
+        {
+            // Portable install: a highest-privilege task pointing at a
+            // user-writable executable is a free escalation for anything that
+            // can drop a file next to it, so keep refusing to create one. Start
+            // normally instead and let WinMain raise itself through UAC.
+            log_bi::write("autostart: unprotected path, falling back to a "
+                          "UAC prompt on every start");
+            return writeRunKey() && setElevationRequested(true);
+        }
 
         bool created = isElevated()
                            ? createTask()
@@ -1097,6 +1191,7 @@ bool autostart_bi::setMode(mode_bi mode)
         if (!created)
             return false;
 
+        setElevationRequested(false);
         return deleteRunKey();
     }
     }

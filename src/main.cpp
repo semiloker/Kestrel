@@ -1491,9 +1491,12 @@ void win_bi::RunAction(int action)
             SaveSettings();
         }
 
-        if (autostart_bi::runTask())
+        // Task Scheduler is the silent path, but it only exists when the
+        // executable sits somewhere a standard user cannot rewrite. Everywhere
+        // else, ask for elevation directly instead of giving up.
+        if (autostart_bi::runTask() || autostart_bi::elevateSelf())
         {
-            log_bi::write("restarting elevated through Task Scheduler");
+            log_bi::write("restarting elevated");
             DestroyWindow(hwnd);
         }
         else
@@ -1998,6 +2001,23 @@ int WINAPI WinMain(HINSTANCE hInstance, [[maybe_unused]] HINSTANCE hPrevInstance
             return 0;
         }
         log_bi::write("relaunch failed, continuing without elevation");
+    }
+
+    // Portable install: no scheduled task is possible from a user-writable
+    // directory, so honour the same setting with a UAC prompt instead. A
+    // declined prompt just continues unelevated - never a relaunch loop,
+    // because the elevated child takes the isElevated() branch out.
+    // FindWindow first so double-clicking the exe while it already runs stays a
+    // "focus the existing window" and does not pop a pointless UAC prompt.
+    if (!autostart_bi::isElevated() && autostart_bi::elevationRequested() &&
+        !FindWindowA(APP_WINDOW_CLASS, NULL))
+    {
+        if (autostart_bi::elevateSelf())
+        {
+            log_bi::shutdown();
+            return 0;
+        }
+        log_bi::write("elevated relaunch failed, continuing without elevation");
     }
 
     HANDLE instanceMutex = CreateMutexW(NULL, TRUE, APP_MUTEX_NAME_WIDE);
