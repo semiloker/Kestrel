@@ -81,7 +81,6 @@ private:
     void OnSetFocus(HWND hwnd);
     void OnKillFocus(HWND hwnd);
     void OnSysCommand(WPARAM wParam, LPARAM lParam);
-    void OnChar(WPARAM wParam);
     void OnClose();
     void OnDestroy();
 

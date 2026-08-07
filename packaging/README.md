@@ -2,9 +2,20 @@
 
 Manifests for every distribution channel in the roadmap. All reference a GitHub
 release asset `kestrel.exe` at tag `v<version>`. **Each has a `0000…` SHA256
-placeholder you must fill in after uploading the release asset** — nothing here
-can be finished until a signed binary is published, because the hash is computed
-from that exact file.
+placeholder that must be filled in after uploading the release asset** — nothing
+here can be finished until a signed binary is published, because the hash is
+computed from that exact file.
+
+Once the release is published, fill all three in one go:
+
+```sh
+python tools/update_package_hashes.py v<version>
+```
+
+It downloads the published asset, hashes it, and rewrites the scoop `hash`, the
+winget `InstallerSha256` and the chocolatey `checksum64`. It refuses to touch a
+manifest that still names an older version, so bump the manifests first. Pass
+`--file build/kestrel.exe` to see the hash of a local build without downloading.
 
 | Channel | Files | What you still need |
 |---------|-------|---------------------|
@@ -28,7 +39,7 @@ winget validate --manifest packaging/winget
 winget install --manifest packaging/winget    # local test
 ```
 Then open a PR against [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs)
-under `manifests/s/semiloker/Kestrel/1.4.4/`.
+under `manifests/s/semiloker/Kestrel/1.5.0/`.
 
 ## Scoop
 
@@ -44,7 +55,7 @@ scoop install kestrel
 cd packaging/chocolatey
 # copy the release kestrel.exe into tools/ OR keep the Get-ChocolateyWebFile URL
 choco pack
-choco push kestrel.1.4.4.nupkg --source https://push.chocolatey.org/
+choco push kestrel.1.5.0.nupkg --source https://push.chocolatey.org/
 ```
 
 ## MSIX / Microsoft Store

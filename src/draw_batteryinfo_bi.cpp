@@ -1434,36 +1434,6 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         break;
     }
 
-    if (!searchQuery.empty())
-    {
-        std::string lowerQuery;
-        for (size_t i = 0; i < searchQuery.size(); ++i)
-            lowerQuery += (char)tolower((unsigned char)searchQuery[i]);
-
-        for (size_t i = 0; i < out.size();)
-        {
-            std::wstring wlabel(out[i].label);
-            std::string label;
-            for (size_t j = 0; j < wlabel.size(); ++j)
-                label += (char)tolower((unsigned char)wlabel[j]);
-
-            std::wstring wdesc(out[i].desc);
-            std::string desc;
-            for (size_t j = 0; j < wdesc.size(); ++j)
-                desc += (char)tolower((unsigned char)wdesc[j]);
-
-            if (label.find(lowerQuery) == std::string::npos &&
-                desc.find(lowerQuery) == std::string::npos)
-            {
-                out.erase(out.begin() + i);
-            }
-            else
-            {
-                ++i;
-            }
-        }
-    }
-
     return (int)out.size();
 }
 
@@ -2068,29 +2038,6 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
             L"number applies \u00B7 arrow saves current setup");
 
     y += 28.0f + CARD_GAP;
-
-    // Search bar temporarily disabled (UX-03). Re-enable by restoring this block;
-    // it also drove searchQuery filtering in buildGroupRows.
-#if 0
-    float searchLeft = L + RAIL_W + 18.0f;
-    float searchRight = R;
-    float searchH = 30.0f;
-    bool searchHot = isHovered(HIT_SEARCH, 0);
-    D2D1_COLOR_F searchBg = searchFocused ? pal.inset : pal.surface;
-    fillRR(searchLeft, y, searchRight, y + searchH, BTN_R, searchBg);
-    strokeRR(searchLeft, y, searchRight, y + searchH, BTN_R,
-             searchFocused ? accentColor : (searchHot ? pal.faint : pal.border), 1.0f);
-    txt(dw->pTextFormatLabel, searchLeft + 8.0f, y, searchRight - 8.0f, y + searchH,
-        searchFocused ? pal.text : pal.muted,
-        searchFocused ? std::wstring(L"") :
-        (searchQuery.empty() ? L"Search settings..." :
-                               wfmt(L"%hs", searchQuery.c_str())));
-    if (searchFocused)
-        txt(dw->pTextFormatLabel, searchLeft + 8.0f, y, searchRight - 8.0f, y + searchH,
-            pal.text, wfmt(L"%hs|", searchQuery.c_str()));
-    pushHit(D2D1::RectF(searchLeft, y, searchRight, y + searchH), HIT_SEARCH, 0, nullptr);
-    y += searchH + CARD_GAP;
-#endif
 
     float railTop = y;
     D2D1_COLOR_F active = accentText();
@@ -3262,13 +3209,6 @@ draw_batteryinfo_bi::click_result_bi draw_batteryinfo_bi::handleClick(POINT curs
 
         case HIT_RAIL:
             setSettingsGroup(h.index);
-            break;
-
-        case HIT_SEARCH:
-            searchFocused = !searchFocused;
-            if (!searchFocused)
-                searchQuery.clear();
-            result.needsSave = true;
             break;
 
         case HIT_PRESET:

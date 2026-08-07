@@ -541,9 +541,6 @@ LRESULT CALLBACK win_bi::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
     case WM_SYSCOMMAND:
         pThis->OnSysCommand(wParam, lParam);
         break;
-    case WM_CHAR:
-        pThis->OnChar(wParam);
-        break;
     case WM_CLOSE:
         pThis->OnClose();
         break;
@@ -1798,31 +1795,6 @@ void win_bi::OnKillFocus([[maybe_unused]] HWND hwnd)
 void win_bi::OnSysCommand(WPARAM wParam, LPARAM lParam)
 {
     DefWindowProc(hwnd, WM_SYSCOMMAND, wParam, lParam);
-}
-
-void win_bi::OnChar(WPARAM wParam)
-{
-    if (!draw_bibi_bi || !draw_bibi_bi->searchFocused)
-        return;
-
-    char c = (char)wParam;
-
-    if (c == '\b')
-    {
-        if (!draw_bibi_bi->searchQuery.empty())
-            draw_bibi_bi->searchQuery.pop_back();
-    }
-    else if (c == 27)
-    {
-        draw_bibi_bi->searchFocused = false;
-        draw_bibi_bi->searchQuery.clear();
-    }
-    else if (c >= 32 && c < 127)
-    {
-        draw_bibi_bi->searchQuery += c;
-    }
-
-    InvalidateRect(hwnd, NULL, FALSE);
 }
 
 void win_bi::OnGetMinMaxInfo(LPARAM lParam)
