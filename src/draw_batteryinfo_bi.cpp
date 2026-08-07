@@ -1141,7 +1141,7 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
         bool missing;
     };
 
-    detail_cell details[6] = {
+    detail_cell details[7] = {
         {L"CHEMISTRY", widen(bi->info_static.Chemistry), false},
         {L"POWER STATE", bi->info_1s.onLine ? L"On mains" : L"On battery", false},
         {L"VOLTAGE",
@@ -1150,13 +1150,17 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
         {L"POWER DRAW",
          bi->info_1s.rateValid ? wfmt(L"%.2f W", bi->info_1s.rateW) : L"\u2014",
          !bi->info_1s.rateValid},
+        {L"TEMPERATURE",
+         bi->info_1s.tempValid ? wfmt(L"%.1f \u00B0C", bi->info_1s.tempC) : L"\u2014",
+         !bi->info_1s.tempValid},
         {L"TIME TO EMPTY", minutesText(bi->info_10s.minutesToEmpty),
          bi->info_10s.minutesToEmpty < 0},
         {L"TIME TO FULL", minutesText(bi->info_10s.minutesToFull),
          bi->info_10s.minutesToFull < 0}};
 
+    const int detailCount = (int)(sizeof(details) / sizeof(details[0]));
     int cols = (IW > 660.0f) ? 3 : 2;
-    int detailRows = (6 + cols - 1) / cols;
+    int detailRows = (detailCount + cols - 1) / cols;
 
     float gap = 16.0f;
     float colW = (IW - gap * (float)(cols - 1)) / (float)cols;
@@ -1165,7 +1169,7 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
     card(L, y, R, y + detailH);
     eyebrow(dw, IX, y + 16.0f, L"DETAILS");
 
-    for (int i = 0; i < 6; ++i)
+    for (int i = 0; i < detailCount; ++i)
     {
         float cx = IX + (float)(i % cols) * (colW + gap);
         float cy = y + 41.0f + (float)(i / cols) * 48.0f;
@@ -1195,7 +1199,45 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
         alerts ? wfmt(L"%.1f Wh", bi->info_static.alert2Wh) : L"Not set",
         DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-    y += 124.0f + PAD;
+    y += 124.0f + CARD_GAP;
+
+    // Firmware identity. Age is the one number here that earns its place: it is
+    // what makes a wear percentage mean something.
+    detail_cell identity[5] = {
+        {L"MANUFACTURER",
+         bi->info_static.manufacturerValid ? widen(bi->info_static.Manufacturer) : L"\u2014",
+         !bi->info_static.manufacturerValid},
+        {L"MODEL",
+         bi->info_static.deviceNameValid ? widen(bi->info_static.DeviceName) : L"\u2014",
+         !bi->info_static.deviceNameValid},
+        {L"SERIAL",
+         bi->info_static.serialValid ? widen(bi->info_static.SerialNumber) : L"\u2014",
+         !bi->info_static.serialValid},
+        {L"MANUFACTURED",
+         bi->info_static.manufactureDateValid ? widen(bi->info_static.ManufactureDate) : L"\u2014",
+         !bi->info_static.manufactureDateValid},
+        {L"AGE",
+         bi->info_static.manufactureDateValid ? widen(bi->info_static.Age) : L"\u2014",
+         !bi->info_static.manufactureDateValid}};
+
+    const int identityCount = (int)(sizeof(identity) / sizeof(identity[0]));
+    int idCols = (IW > 660.0f) ? 3 : 2;
+    int idRows = (identityCount + idCols - 1) / idCols;
+    float idColW = (IW - gap * (float)(idCols - 1)) / (float)idCols;
+    float identityH = 41.0f + (float)idRows * 48.0f + 14.0f;
+
+    card(L, y, R, y + identityH);
+    eyebrow(dw, IX, y + 16.0f, L"BATTERY");
+
+    for (int i = 0; i < identityCount; ++i)
+    {
+        float cx = IX + (float)(i % idCols) * (idColW + gap);
+        float cy = y + 41.0f + (float)(i / idCols) * 48.0f;
+
+        statCell(dw, cx, cy, idColW, identity[i].label, identity[i].value, identity[i].missing);
+    }
+
+    y += identityH + PAD;
 
     contentHeight = y + scrollOffsetY + FOOTER_H;
     clampScroll();
@@ -1330,6 +1372,11 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         r = {L"Power flow graph", &ov->hud.metrics[HUD_M_BATTERYD].show,
              &ov->hud.metrics[HUD_M_BATTERYD].graphed, MC_POWER, bi->present,
              L"Battery charge/discharge watts (Bat:)", HUD_M_BATTERYD};
+        out.push_back(r);
+        r = {L"Temperature", &ov->hud.metrics[HUD_M_BATTEMP].show,
+             &ov->hud.metrics[HUD_M_BATTEMP].graphed, MC_POWER,
+             bi->present && bi->info_1s.tempValid,
+             L"Battery pack temperature (BaT: C)", HUD_M_BATTEMP};
         out.push_back(r);
         break;
 
@@ -2490,6 +2537,16 @@ void draw_batteryinfo_bi::drawCaptureTab(ID2D1HwndRenderTarget *pRT, init_dwrite
             L"The frame CSV and summary are being written in the background.");
 
         button(dw, IX, y + 80.0f, 160.0f, L"Please wait", false, false);
+    }
+    else if (cap.finalizeFailed)
+    {
+        txt(dw->pTextFormatStrong, IX, y + 32.0f, IR, y + 52.0f, pal.bad,
+            L"The last run could not be saved");
+        txt(dw->pTextFormatSmall, IX, y + 54.0f, IR, y + 72.0f, pal.muted,
+            L"Nothing reached the captures folder. kestrel.log records why.");
+
+        button(dw, IX, y + 80.0f, 160.0f, L"Start recording", true,
+               isHovered(HIT_ACTION, ACT_TOGGLE_CAPTURE));
     }
     else
     {

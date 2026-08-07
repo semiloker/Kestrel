@@ -1008,6 +1008,7 @@ draw_batteryinfo_bi::capture_view_bi win_bi::BuildCaptureView()
     view.liveLow1Valid = captureMgr.getCapture().liveLow1Valid();
 
     view.hasLast = captureMgr.hasLastSummary();
+    view.finalizeFailed = captureMgr.finalizeFailed();
     view.last = captureMgr.lastSummary();
 
     captureMgr.loadHistory();
@@ -1168,6 +1169,11 @@ void win_bi::UpdateOverlayHud()
     if (ru_bi->gpuInfo.gpuTempAvailable)
         ov_bi->hud.push(HUD_M_GPUTEMP, ru_bi->gpuInfo.gpuTempC);
 
+    ov_bi->hud.metrics[HUD_M_BATTEMP].available =
+        bi_bi->present && bi_bi->info_1s.tempValid;
+    if (bi_bi->present && bi_bi->info_1s.tempValid)
+        ov_bi->hud.push(HUD_M_BATTEMP, bi_bi->info_1s.tempC);
+
     ov_bi->hud.push(HUD_M_CPU, snapCpu.UsageValue);
     ov_bi->hud.push(HUD_M_GPU, snapGpu.gpuLoadValue);
     ov_bi->hud.push(HUD_M_RAM, snapRam.loadValue);
@@ -1202,28 +1208,30 @@ void win_bi::UpdateOverlayHud()
     // rebind them to unrelated CPU/RAM toggles.
     if (ov_bi->hud.showNetwork)
     {
-        if (!ru_bi->networkInfo.empty())
+        // An interface with no previous sample formats as "-", and running
+        // that back through atof() produced a confident 0.0 KB/s for a speed
+        // nobody had measured - exactly the plausible-looking zero the README
+        // promises never to print. Sum only interfaces that actually measured.
+        double totalDown = 0.0, totalUp = 0.0;
+        bool anyMeasured = false;
+        for (size_t i = 0; i < ru_bi->networkInfo.size(); ++i)
         {
-            double totalDown = 0.0, totalUp = 0.0;
-            for (size_t i = 0; i < ru_bi->networkInfo.size(); ++i)
-            {
-                const char *ds = ru_bi->networkInfo[i].downloadSpeed.c_str();
-                const char *us = ru_bi->networkInfo[i].uploadSpeed.c_str();
-                totalDown += atof(ds);
-                totalUp += atof(us);
-            }
+            if (!ru_bi->networkInfo[i].speedValid)
+                continue;
+            totalDown += ru_bi->networkInfo[i].downKBs;
+            totalUp += ru_bi->networkInfo[i].upKBs;
+            anyMeasured = true;
+        }
+
+        if (anyMeasured)
+        {
             ov_bi->hud.netDownKBs = totalDown;
             ov_bi->hud.netUpKBs = totalUp;
             ov_bi->hud.push(HUD_M_NETDOWN, totalDown);
             ov_bi->hud.push(HUD_M_NETUP, totalUp);
-            ov_bi->hud.metrics[HUD_M_NETDOWN].available = true;
-            ov_bi->hud.metrics[HUD_M_NETUP].available = true;
         }
-        else
-        {
-            ov_bi->hud.metrics[HUD_M_NETDOWN].available = false;
-            ov_bi->hud.metrics[HUD_M_NETUP].available = false;
-        }
+        ov_bi->hud.metrics[HUD_M_NETDOWN].available = anyMeasured;
+        ov_bi->hud.metrics[HUD_M_NETUP].available = anyMeasured;
     }
 
     if (ov_bi->hud.showDisk && !ru_bi->disksInfo.empty())
@@ -1665,13 +1673,24 @@ void win_bi::OnTimer(WPARAM wParam)
     switch (wParam)
     {
     case 1:
-        bi_bi->QueryBatteryInfo();
-        bi_bi->QueryBatteryStatus();
+    {
+        // 1.4.4 taught TaggedIoctl to re-acquire the tag, but the timer still
+        // threw the answer away: when Recover() also fails - battery pulled,
+        // driver gone for good - the readings stayed frozen on their last good
+        // values. present is what every battery row and the HUD metric gate on,
+        // so clearing it is what turns them back into dashes. Both queries run
+        // regardless; short-circuiting would skip the second one's recovery.
+        bool infoOk = bi_bi->QueryBatteryInfo();
+        bool statusOk = bi_bi->QueryBatteryStatus();
+        bi_bi->present = infoOk && statusOk;
+        bi_bi->QueryBatteryTemperature();
+
         UpdateTrayTooltip();
 
         if (IsWindowVisible(hwnd))
             InvalidateRect(hwnd, NULL, true);
         break;
+    }
 
     case 2:
         bi_bi->QueryBatteryRemaining();

@@ -36,7 +36,7 @@ namespace
     // HUD_M_* enum in hud_bi.h.
     const char *METRIC_KEYS[HUD_M_COUNT] = {
         "fps", "pre", "gpums", "cpu", "gpu", "ram", "commit", "cpuw", "gpuw", "batteryd",
-        "netdown", "netup", "disk", "cputemp", "gputemp"};
+        "netdown", "netup", "disk", "cputemp", "gputemp", "battemp"};
     static_assert(sizeof(METRIC_KEYS) / sizeof(METRIC_KEYS[0]) == HUD_M_COUNT,
                   "METRIC_KEYS must have one entry per HUD_M_* metric");
 
@@ -810,42 +810,9 @@ void settings_bi::applyTo(resource_usage_bi *ru, overlay_bi *ov,
         ov->hud.showNetwork = getBool("hud.network", ov->hud.showNetwork);
         ov->hud.showDisk = getBool("hud.disk", ov->hud.showDisk);
 
-        std::string orderStr = getString("hud.metricOrder", "");
         std::vector<int> parsedOrder;
-        bool orderValid = true;
-        bool seen[HUD_M_COUNT] = {};
-        if (!orderStr.empty())
-        {
-            size_t pos = 0;
-            while (pos < orderStr.size())
-            {
-                size_t comma = orderStr.find(',', pos);
-                std::string token = (comma == std::string::npos)
-                    ? orderStr.substr(pos) : orderStr.substr(pos, comma - pos);
-                trim(token);
-                int id = -1;
-                std::from_chars_result parsed = std::from_chars(
-                    token.data(), token.data() + token.size(), id);
-                if (token.empty() || parsed.ec != std::errc() ||
-                    parsed.ptr != token.data() + token.size() ||
-                    id < 0 || id >= HUD_M_COUNT || seen[id])
-                {
-                    orderValid = false;
-                    break;
-                }
-                seen[id] = true;
-                parsedOrder.push_back(id);
-                if (comma == std::string::npos)
-                    break;
-                pos = comma + 1;
-            }
-        }
-        if (!orderStr.empty() &&
-            (!orderValid || parsedOrder.size() != HUD_M_COUNT))
-        {
+        if (!hud_parseMetricOrder(getString("hud.metricOrder", ""), parsedOrder))
             log_bi::write("settings: ignoring invalid hud.metricOrder");
-            parsedOrder.clear();
-        }
         ov->hud.metricOrder.swap(parsedOrder);
 
         float graphHeight =

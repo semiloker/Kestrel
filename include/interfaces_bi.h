@@ -123,6 +123,12 @@ public:
         std::string interfaceName;
         std::string downloadSpeed;
         std::string uploadSpeed;
+        // The formatted strings above are for display. These are the values
+        // the HUD reads: an interface seen for the first time has no previous
+        // counter to difference against, and no measured speed at all.
+        double downKBs = 0.0;
+        double upKBs = 0.0;
+        bool speedValid = false;
         bool show_interfaceName = false;
         bool show_downloadSpeed = false;
         bool show_uploadSpeed = false;
@@ -216,6 +222,23 @@ public:
         bool wearValid = false;
         bool cycleCountValid = false;
         bool alertsValid = false;
+
+        // Firmware identity. Queried once - none of it changes while the pack
+        // stays in the machine - and each field is independently optional
+        // because plenty of firmware exposes some and not others.
+        std::string Manufacturer;
+        std::string DeviceName;
+        std::string SerialNumber;
+        std::string ManufactureDate;
+        std::string Age;
+        int manufactureYear = 0;
+        int manufactureMonth = 0;
+        int manufactureDay = 0;
+        double ageYears = 0.0;
+        bool manufacturerValid = false;
+        bool deviceNameValid = false;
+        bool serialValid = false;
+        bool manufactureDateValid = false;
     };
 
     struct bi_struct_dynamic_1s
@@ -225,6 +248,8 @@ public:
         std::string PowerState;
         std::string RemainingCapacity;
         std::string ChargeLevel;
+        std::string Temperature;
+        double tempC = 0.0;
         double voltageV = 0.0;
         double rateW = 0.0;
         double remainingWh = 0.0;
@@ -233,6 +258,7 @@ public:
         bool rateValid = false;
         bool remainingValid = false;
         bool chargeValid = false;
+        bool tempValid = false;
         bool charging = false;
         bool discharging = false;
         bool onLine = false;
@@ -241,6 +267,7 @@ public:
         bool PowerState_ = false;
         bool RemainingCapacity_ = false;
         bool ChargeLevel_ = false;
+        bool Temperature_ = false;
     };
 
     struct bi_struct_dynamic_10s
@@ -258,6 +285,8 @@ public:
     virtual bool QueryBatteryStatus() = 0;
     virtual bool QueryBatteryRemaining() = 0;
     virtual bool QueryBatteryCycleCount() = 0;
+    virtual bool QueryBatteryTemperature() = 0;
+    virtual bool QueryBatteryIdentity() = 0;
 };
 
 // ─── IETWTrace ─────────────────────────────────────────────────────────────

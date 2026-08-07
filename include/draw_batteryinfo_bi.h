@@ -88,6 +88,7 @@ public:
         double liveLow1 = 0.0;
         bool liveLow1Valid = false;
         bool hasLast = false;
+        bool finalizeFailed = false;
         capture_bi::summary_bi last;
         std::vector<capture_bi::summary_bi> history;
     };

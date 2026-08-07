@@ -3,7 +3,54 @@
 #include <dwmapi.h>
 #include <cstdio>
 #include <algorithm>
+#include <cctype>
+#include <charconv>
 #include <format>
+
+bool hud_parseMetricOrder(const std::string &text, std::vector<int> &out)
+{
+    out.clear();
+    if (text.empty())
+        return true;
+
+    bool seen[HUD_M_COUNT] = {};
+    size_t pos = 0;
+    while (pos < text.size())
+    {
+        size_t comma = text.find(',', pos);
+        std::string token = (comma == std::string::npos)
+            ? text.substr(pos) : text.substr(pos, comma - pos);
+
+        while (!token.empty() && std::isspace((unsigned char)token.front()))
+            token.erase(token.begin());
+        while (!token.empty() && std::isspace((unsigned char)token.back()))
+            token.pop_back();
+
+        int id = -1;
+        std::from_chars_result parsed = std::from_chars(
+            token.data(), token.data() + token.size(), id);
+        if (token.empty() || parsed.ec != std::errc() ||
+            parsed.ptr != token.data() + token.size() ||
+            id < 0 || id >= HUD_M_COUNT || seen[id])
+        {
+            out.clear();
+            return false;
+        }
+
+        seen[id] = true;
+        out.push_back(id);
+        if (comma == std::string::npos)
+            break;
+        pos = comma + 1;
+    }
+
+    for (int id = 0; id < HUD_M_COUNT; ++id)
+    {
+        if (!seen[id])
+            out.push_back(id);
+    }
+    return true;
+}
 
 hud_series_bi::hud_series_bi(size_t capacity)
     : data(capacity > 0 ? capacity : 1, 0.0),
@@ -200,6 +247,13 @@ hud_bi::hud_bi()
     metrics[HUD_M_GPUTEMP].graph = HUD_G_TEMP;
     metrics[HUD_M_GPUTEMP].show = false;
     metrics[HUD_M_GPUTEMP].graphed = true;
+
+    metrics[HUD_M_BATTEMP].label = "BaT:";
+    metrics[HUD_M_BATTEMP].unit = "°C";
+    metrics[HUD_M_BATTEMP].color = HUD_COLOR_GREEN;
+    metrics[HUD_M_BATTEMP].graph = HUD_G_TEMP;
+    metrics[HUD_M_BATTEMP].show = false;
+    metrics[HUD_M_BATTEMP].graphed = true;
 }
 
 void hud_bi::initStaticInfo(const std::string &adapterName)

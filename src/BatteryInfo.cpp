@@ -1,7 +1,9 @@
 #include "BatteryInfo.h"
 #include "logger_bi.h"
+#include "paths_bi.h"
 
 #include <climits>
+#include <cwchar>
 #include <format>
 
 namespace
@@ -63,6 +65,8 @@ bool batteryinfo_bi::Initialize()
     present = QueryTag() && QueryBatteryInfo() && QueryBatteryStatus() && QueryBatteryRemaining();
 
     QueryBatteryCycleCount();
+    QueryBatteryIdentity();
+    QueryBatteryTemperature();
 
     return present;
 }
@@ -90,6 +94,9 @@ bool batteryinfo_bi::Recover()
     present = true;
     if (!info_static.cycleCountValid)
         QueryBatteryCycleCount();
+    if (!info_static.manufacturerValid && !info_static.deviceNameValid &&
+        !info_static.serialValid && !info_static.manufactureDateValid)
+        QueryBatteryIdentity();
 
     return true;
 }
@@ -183,6 +190,7 @@ bool batteryinfo_bi::QueryBatteryCycleCount()
     if (FAILED(hres))
     {
         info_static.CycleCount = "WMI proxy failed";
+        log_bi::write("cycle count: CoSetProxyBlanket failed (0x%08lX)", (unsigned long)hres);
         pSvc->Release();
         pLoc->Release();
         CoUninitialize();
@@ -202,6 +210,8 @@ bool batteryinfo_bi::QueryBatteryCycleCount()
     if (FAILED(hres) || !pEnumerator)
     {
         info_static.CycleCount = "Query failed";
+        log_bi::write("cycle count: ExecQuery for BatteryCycleCount failed (0x%08lX)",
+                      (unsigned long)hres);
         pSvc->Release();
         pLoc->Release();
         CoUninitialize();
@@ -370,6 +380,117 @@ bool batteryinfo_bi::QueryBatteryStatus()
     }
 
     return true;
+}
+
+bool batteryinfo_bi::QueryInfoString(ULONG level, std::string *out)
+{
+    BATTERY_QUERY_INFORMATION bqi = {};
+    bqi.InformationLevel = (BATTERY_QUERY_INFORMATION_LEVEL)level;
+
+    // Firmware identity strings are short. The spare trailing element means a
+    // pack that fills the buffer still leaves something to terminate on.
+    WCHAR buffer[256] = {};
+    if (!TaggedIoctl(IOCTL_BATTERY_QUERY_INFORMATION, &bqi, sizeof(bqi),
+                     buffer, sizeof(buffer) - sizeof(WCHAR)))
+        return false;
+
+    size_t len = wcsnlen(buffer, 255);
+    if (len == 0)
+        return false;
+
+    *out = paths_bi::wideToUtf8(std::wstring(buffer, len));
+    return true;
+}
+
+// Decikelvin from the pack's own sensor. Plenty of firmware does not wire this
+// up at all, which is why every failure path marks it invalid rather than
+// leaving a stale reading or inventing a room-temperature default.
+bool batteryinfo_bi::QueryBatteryTemperature()
+{
+    BATTERY_QUERY_INFORMATION bqi = {};
+    bqi.InformationLevel = BatteryTemperature;
+
+    ULONG deciKelvin = 0;
+    bool ok = TaggedIoctl(IOCTL_BATTERY_QUERY_INFORMATION, &bqi, sizeof(bqi),
+                          &deciKelvin, sizeof(deciKelvin));
+
+    double celsius = ok ? (deciKelvin / 10.0 - 273.15) : 0.0;
+
+    // 0 decikelvin is the "not measured" answer, not absolute zero, and a pack
+    // outside this band is reporting a placeholder rather than a temperature.
+    if (!ok || deciKelvin == 0 || celsius < -40.0 || celsius > 150.0)
+    {
+        info_1s.tempValid = false;
+        info_1s.tempC = 0.0;
+        info_1s.Temperature = "Unknown";
+        return false;
+    }
+
+    info_1s.tempC = celsius;
+    info_1s.tempValid = true;
+    info_1s.Temperature = std::format("{:.1f} C", celsius);
+    return true;
+}
+
+// Manufacturer, model, serial and build date. Static for as long as the pack
+// stays in the machine, so this runs once from Initialize().
+bool batteryinfo_bi::QueryBatteryIdentity()
+{
+    info_static.manufacturerValid =
+        QueryInfoString(BatteryManufactureName, &info_static.Manufacturer);
+    info_static.deviceNameValid =
+        QueryInfoString(BatteryDeviceName, &info_static.DeviceName);
+    info_static.serialValid =
+        QueryInfoString(BatterySerialNumber, &info_static.SerialNumber);
+
+    if (!info_static.manufacturerValid)
+        info_static.Manufacturer = "Unknown";
+    if (!info_static.deviceNameValid)
+        info_static.DeviceName = "Unknown";
+    if (!info_static.serialValid)
+        info_static.SerialNumber = "Unknown";
+
+    BATTERY_QUERY_INFORMATION bqi = {};
+    bqi.InformationLevel = BatteryManufactureDate;
+    BATTERY_MANUFACTURE_DATE made = {};
+
+    bool dateOk = TaggedIoctl(IOCTL_BATTERY_QUERY_INFORMATION, &bqi, sizeof(bqi),
+                              &made, sizeof(made));
+
+    if (dateOk && made.Year >= 1980 && made.Month >= 1 && made.Month <= 12 &&
+        made.Day >= 1 && made.Day <= 31)
+    {
+        info_static.manufactureYear = (int)made.Year;
+        info_static.manufactureMonth = (int)made.Month;
+        info_static.manufactureDay = (int)made.Day;
+        info_static.manufactureDateValid = true;
+        info_static.ManufactureDate = std::format("{:04}-{:02}-{:02}",
+                                                  (int)made.Year, (int)made.Month, (int)made.Day);
+
+        SYSTEMTIME now = {};
+        GetLocalTime(&now);
+
+        int months = ((int)now.wYear - info_static.manufactureYear) * 12 +
+                     ((int)now.wMonth - info_static.manufactureMonth);
+        if ((int)now.wDay < info_static.manufactureDay)
+            --months;
+        if (months < 0)
+            months = 0;
+
+        info_static.ageYears = months / 12.0;
+        info_static.Age = (months < 12)
+            ? std::format("{} months", months)
+            : std::format("{} y {} m", months / 12, months % 12);
+    }
+    else
+    {
+        info_static.manufactureDateValid = false;
+        info_static.ManufactureDate = "Unknown";
+        info_static.Age = "Unknown";
+    }
+
+    return info_static.manufacturerValid || info_static.deviceNameValid ||
+           info_static.serialValid || info_static.manufactureDateValid;
 }
 
 bool batteryinfo_bi::QueryBatteryRemaining()

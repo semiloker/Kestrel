@@ -1,4 +1,5 @@
 #include "capture_manager_bi.h"
+#include "logger_bi.h"
 
 #include <utility>
 
@@ -27,6 +28,9 @@ DWORD WINAPI capture_manager_bi::finalizeEntry(LPVOID param)
     }
     catch (...)
     {
+        // stop() writes the frame CSV and appends to index.csv; a throw here
+        // used to leave no trace at all.
+        log_bi::write("capture: finalize threw, the run was not saved");
         succeeded = false;
     }
 
@@ -50,6 +54,7 @@ void capture_manager_bi::beginFinalize()
     pendingReady = false;
     pendingSucceeded = false;
     LeaveCriticalSection(&finalizeLock);
+    lastFinalizeFailed = false;
 
     finalizeThread = CreateThread(
         NULL, 0, &capture_manager_bi::finalizeEntry, this, 0, NULL);
@@ -66,11 +71,16 @@ void capture_manager_bi::beginFinalize()
         LeaveCriticalSection(&finalizeLock);
 
         finalizeCapture.reset();
+        lastFinalizeFailed = !succeeded;
         if (succeeded)
         {
             lastCapture = summary;
             haveLastCapture = true;
             captureHistoryLoaded = false;
+        }
+        else
+        {
+            log_bi::write("capture: finalize failed inline, the run was not saved");
         }
     }
 }
@@ -97,11 +107,20 @@ void capture_manager_bi::pollFinalize()
     LeaveCriticalSection(&finalizeLock);
 
     finalizeCapture.reset();
+    lastFinalizeFailed = !(ready && succeeded);
     if (ready && succeeded)
     {
         lastCapture = summary;
         haveLastCapture = true;
         captureHistoryLoaded = false;
+    }
+    else if (ready)
+    {
+        log_bi::write("capture: finalize failed, the run was not saved");
+    }
+    else
+    {
+        log_bi::write("capture: finalize produced no result, the run was not saved");
     }
 }
 
@@ -128,6 +147,7 @@ void capture_manager_bi::toggle(const std::string &processName, DWORD processId)
     }
     else if (!finalizeThread)
     {
+        lastFinalizeFailed = false;
         cap_.start(processName, processId);
     }
 }

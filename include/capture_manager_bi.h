@@ -30,6 +30,11 @@ public:
     const capture_bi::summary_bi &lastSummary() const { return lastCapture; }
     bool hasLastSummary() const { return haveLastCapture; }
 
+    // True when the most recent finalize could not write the run out. Without
+    // this the run just vanishes from history with nothing in the log, which
+    // is the same symptom 1.4.3 fixed on the recording side.
+    bool finalizeFailed() const { return lastFinalizeFailed; }
+
     const std::vector<capture_bi::summary_bi> &history() const { return captureHistory; }
     std::vector<capture_bi::summary_bi> &history() { return captureHistory; }
 
@@ -39,6 +44,7 @@ private:
     capture_bi cap_;
     capture_bi::summary_bi lastCapture;
     bool haveLastCapture = false;
+    bool lastFinalizeFailed = false;
     std::vector<capture_bi::summary_bi> captureHistory;
     bool captureHistoryLoaded = false;
 

@@ -222,6 +222,9 @@ bool resource_usage_bi::updateNetworkInto(std::vector<NetworkInfo> &network)
 
             netInfo.downloadSpeed = std::format("{:.1f} KB/s", down);
             netInfo.uploadSpeed = std::format("{:.1f} KB/s", up);
+            netInfo.downKBs = down;
+            netInfo.upKBs = up;
+            netInfo.speedValid = true;
         }
         else
         {
