@@ -363,6 +363,9 @@ bool win_bi::Create(int nCmdShow, bool startInTray)
 
     i18n_bi::load(settings.getString("ui.language", "en"));
 
+    batteryHistory.setEnabled(settings.getBool("battery.history", true));
+    batteryHistory.setIntervalMinutes(settings.getInt("battery.historyMinutes", 5));
+
     updater.reset(new update_bi());
 
     etwTrace.reset(new etw_bi());
@@ -1689,6 +1692,7 @@ void win_bi::OnTimer(WPARAM wParam)
         bool statusOk = bi_bi->QueryBatteryStatus();
         bi_bi->present = infoOk && statusOk;
         bi_bi->QueryBatteryTemperature();
+        batteryHistory.tick(bi_bi.get());
 
         UpdateTrayTooltip();
 
@@ -1838,6 +1842,8 @@ void win_bi::OnGetMinMaxInfo(LPARAM lParam)
 void win_bi::SaveSettings()
 {
     settings.collectFrom(ru_bi.get(), ov_bi.get(), draw_bibi_bi.get(), bi_bi.get());
+    settings.setBool("battery.history", batteryHistory.isEnabled());
+    settings.setInt("battery.historyMinutes", batteryHistory.getIntervalMinutes());
     if (auto r = settings.save(); !r.ok())
         log_bi::write("settings: %s", r.error().c_str());
 }

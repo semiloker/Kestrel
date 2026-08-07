@@ -110,55 +110,6 @@ namespace
         return true;
     }
 
-    FILE *openRegularAppend(const std::wstring &path, bool *emptyOut)
-    {
-        if (emptyOut)
-            *emptyOut = false;
-
-        HANDLE handle = CreateFileW(
-            path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
-        if (handle == INVALID_HANDLE_VALUE)
-            return NULL;
-
-        FILE_ATTRIBUTE_TAG_INFO attributes = {};
-        BY_HANDLE_FILE_INFORMATION information = {};
-        if (GetFileType(handle) != FILE_TYPE_DISK ||
-            !GetFileInformationByHandleEx(
-                handle, FileAttributeTagInfo, &attributes, sizeof(attributes)) ||
-            (attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 ||
-            !GetFileInformationByHandle(handle, &information) ||
-            information.nNumberOfLinks != 1)
-        {
-            CloseHandle(handle);
-            return NULL;
-        }
-
-        if (emptyOut)
-            *emptyOut = information.nFileSizeHigh == 0 &&
-                        information.nFileSizeLow == 0;
-
-        LARGE_INTEGER offset = {};
-        if (!SetFilePointerEx(handle, offset, NULL, FILE_END))
-        {
-            CloseHandle(handle);
-            return NULL;
-        }
-
-        int fd = _open_osfhandle(
-            (intptr_t)handle, _O_WRONLY | _O_BINARY | _O_APPEND);
-        if (fd < 0)
-        {
-            CloseHandle(handle);
-            return NULL;
-        }
-
-        FILE *file = _fdopen(fd, "ab");
-        if (!file)
-            _close(fd);
-        return file;
-    }
-
     FILE *openRegularRead(const std::wstring &path)
     {
         HANDLE handle = CreateFileW(
@@ -503,7 +454,7 @@ bool capture_bi::appendIndex(const summary_bi &s) const
     std::wstring path = dir + L"\\index.csv";
 
     bool fresh = false;
-    FILE *f = openRegularAppend(path, &fresh);
+    FILE *f = paths_bi::openRegularAppend(path, &fresh);
     if (!f)
         return false;
 

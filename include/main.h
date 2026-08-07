@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "BatteryInfo.h"
+#include "battery_history_bi.h"
 #include "init_d2d1_bi.h"
 #include "init_dwrite_bi.h"
 #include "draw_batteryinfo_bi.h"
@@ -123,6 +124,8 @@ private:
     HANDLE restartGuard = INVALID_HANDLE_VALUE;
 
     settings_bi settings;
+
+    battery_history_bi batteryHistory;
 
     DWORD hudTargetPid = 0;
     DWORD lastProfilePid = 0;
