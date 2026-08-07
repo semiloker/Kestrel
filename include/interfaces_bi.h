@@ -147,7 +147,11 @@ public:
         bool gpuPowerAvailable = false;
         double gpuTempC = 0.0;
         bool gpuTempAvailable = false;
+        double gpuFanRpm = 0.0;
+        double gpuFanMaxRpm = 0.0;
+        bool gpuFanAvailable = false;
         bool show_gpuTemp = false;
+        bool show_gpuFan = false;
         bool show_gpuName = true;
         bool show_gpuLoad = true;
         bool show_vram = false;

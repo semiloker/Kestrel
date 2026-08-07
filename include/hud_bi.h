@@ -92,6 +92,7 @@ enum hud_metric_id_bi
     HUD_M_CPUTEMP,
     HUD_M_GPUTEMP,
     HUD_M_BATTEMP,
+    HUD_M_GPUFAN,
     HUD_M_COUNT
 };
 

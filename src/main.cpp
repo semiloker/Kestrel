@@ -1174,6 +1174,10 @@ void win_bi::UpdateOverlayHud()
     if (bi_bi->present && bi_bi->info_1s.tempValid)
         ov_bi->hud.push(HUD_M_BATTEMP, bi_bi->info_1s.tempC);
 
+    ov_bi->hud.metrics[HUD_M_GPUFAN].available = ru_bi->gpuInfo.gpuFanAvailable;
+    if (ru_bi->gpuInfo.gpuFanAvailable)
+        ov_bi->hud.push(HUD_M_GPUFAN, ru_bi->gpuInfo.gpuFanRpm);
+
     ov_bi->hud.push(HUD_M_CPU, snapCpu.UsageValue);
     ov_bi->hud.push(HUD_M_GPU, snapGpu.gpuLoadValue);
     ov_bi->hud.push(HUD_M_RAM, snapRam.loadValue);
@@ -1189,6 +1193,7 @@ void win_bi::UpdateOverlayHud()
     ov_bi->hud.metrics[HUD_M_GPUW].show = ru_bi->gpuInfo.show_gpuPower;
     ov_bi->hud.metrics[HUD_M_CPUTEMP].show = ru_bi->cpuInfo.show_cpuTemp;
     ov_bi->hud.metrics[HUD_M_GPUTEMP].show = ru_bi->gpuInfo.show_gpuTemp;
+    ov_bi->hud.metrics[HUD_M_GPUFAN].show = ru_bi->gpuInfo.show_gpuFan;
     ov_bi->hud.showDevice = ru_bi->gpuInfo.show_gpuName;
     ov_bi->hud.showMem = ru_bi->ramInfo.show_ullTotalPhys;
 

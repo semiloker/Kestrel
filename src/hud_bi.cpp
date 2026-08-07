@@ -254,6 +254,12 @@ hud_bi::hud_bi()
     metrics[HUD_M_BATTEMP].graph = HUD_G_TEMP;
     metrics[HUD_M_BATTEMP].show = false;
     metrics[HUD_M_BATTEMP].graphed = true;
+
+    metrics[HUD_M_GPUFAN].label = "GPU:";
+    metrics[HUD_M_GPUFAN].unit = "RPM";
+    metrics[HUD_M_GPUFAN].color = HUD_COLOR_WHITE;
+    metrics[HUD_M_GPUFAN].graph = HUD_G_NONE;
+    metrics[HUD_M_GPUFAN].show = false;
 }
 
 void hud_bi::initStaticInfo(const std::string &adapterName)

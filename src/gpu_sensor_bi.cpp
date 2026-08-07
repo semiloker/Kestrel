@@ -246,46 +246,74 @@ bool gpu_sensor_bi::readD3dkmt(reading_bi *out)
         if (openFn(&open) != 0 || open.hAdapter == 0)
             continue;
 
-        kmt_adapter_perfdata_bi perf;
-        ZeroMemory(&perf, sizeof(perf));
-        perf.PhysicalAdapterIndex = 0;
-
-        kmt_query_adapter_info_bi qai;
-        ZeroMemory(&qai, sizeof(qai));
-        qai.hAdapter = open.hAdapter;
-        qai.Type = KMTQAITYPE_ADAPTERPERFDATA_BI;
-        qai.pPrivateDriverData = &perf;
-        qai.PrivateDriverDataSize = sizeof(perf);
-
         bool got = false;
 
-        if (queryFn(&qai) == 0)
+        // One LUID can front several physical GPUs - linked adapters, and the
+        // hybrid parts where the render device is not physical index 0. Only
+        // index 0 was ever asked, so on those machines the driver's thermal and
+        // fan data was reported as absent. Take the first index that answers
+        // with a plausible temperature.
+        const ULONG MAX_PHYSICAL_ADAPTERS = 4;
+
+        for (ULONG phys = 0; phys < MAX_PHYSICAL_ADAPTERS && !got; ++phys)
         {
+            kmt_adapter_perfdata_bi perf;
+            ZeroMemory(&perf, sizeof(perf));
+            perf.PhysicalAdapterIndex = phys;
+
+            kmt_query_adapter_info_bi qai;
+            ZeroMemory(&qai, sizeof(qai));
+            qai.hAdapter = open.hAdapter;
+            qai.Type = KMTQAITYPE_ADAPTERPERFDATA_BI;
+            qai.pPrivateDriverData = &perf;
+            qai.PrivateDriverDataSize = sizeof(perf);
+
+            // A refused index means there is no such physical adapter; higher
+            // ones will not exist either.
+            if (queryFn(&qai) != 0)
+                break;
+
             double celsius = (double)perf.Temperature / 10.0;
+            if (!plausibleTemp(celsius))
+                continue;
 
-            if (plausibleTemp(celsius))
+            out->temperatureC = celsius;
+            out->adapterName = adapters_[i].name;
+            out->source = "d3dkmt";
+            out->temperatureMaxC = 0.0;
+
+            // A reported 0 RPM is ambiguous: modern cards idle their fans
+            // completely, which reads identically to a driver that does not
+            // report fans at all. MaxFanRPM from the caps query is what
+            // separates them - a driver that knows the maximum knows there
+            // is a fan, so 0 is a real idle rather than a missing sensor.
+            out->fanRpm = (double)perf.FanRPM;
+            out->fanMaxRpm = 0.0;
+            out->fanValid = perf.FanRPM > 0;
+
+            kmt_adapter_perfdatacaps_bi caps;
+            ZeroMemory(&caps, sizeof(caps));
+            caps.PhysicalAdapterIndex = phys;
+
+            kmt_query_adapter_info_bi qcaps;
+            ZeroMemory(&qcaps, sizeof(qcaps));
+            qcaps.hAdapter = open.hAdapter;
+            qcaps.Type = KMTQAITYPE_ADAPTERPERFDATACAPS_BI;
+            qcaps.pPrivateDriverData = &caps;
+            qcaps.PrivateDriverDataSize = sizeof(caps);
+
+            if (queryFn(&qcaps) == 0)
             {
-                out->temperatureC = celsius;
-                out->adapterName = adapters_[i].name;
-                out->source = "d3dkmt";
-                out->temperatureMaxC = 0.0;
-
-                kmt_adapter_perfdatacaps_bi caps;
-                ZeroMemory(&caps, sizeof(caps));
-                caps.PhysicalAdapterIndex = 0;
-
-                kmt_query_adapter_info_bi qcaps;
-                ZeroMemory(&qcaps, sizeof(qcaps));
-                qcaps.hAdapter = open.hAdapter;
-                qcaps.Type = KMTQAITYPE_ADAPTERPERFDATACAPS_BI;
-                qcaps.pPrivateDriverData = &caps;
-                qcaps.PrivateDriverDataSize = sizeof(caps);
-
-                if (queryFn(&qcaps) == 0 && caps.TemperatureMax > 0)
+                if (caps.TemperatureMax > 0)
                     out->temperatureMaxC = (double)caps.TemperatureMax / 10.0;
-
-                got = true;
+                if (caps.MaxFanRPM > 0)
+                {
+                    out->fanMaxRpm = (double)caps.MaxFanRPM;
+                    out->fanValid = true;
+                }
             }
+
+            got = true;
         }
 
         if (closeFn)

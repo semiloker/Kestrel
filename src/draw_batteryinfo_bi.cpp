@@ -1309,6 +1309,10 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
              &ov->hud.metrics[HUD_M_GPUW].graphed, MC_POWER, ru->gpuInfo.gpuPowerAvailable,
              L"GPU watts from the Energy Meter (GPU: W)", HUD_M_GPUW};
         out.push_back(r);
+        r = {L"Fan speed", &ru->gpuInfo.show_gpuFan,
+             nullptr, MC_NONE, ru->gpuInfo.gpuFanAvailable,
+             L"Graphics card fan speed (GPU: RPM)", HUD_M_GPUFAN};
+        out.push_back(r);
         r = {L"Adapter name", &ru->gpuInfo.show_gpuName, nullptr, MC_NONE, true,
              L"Graphics card model"};
         out.push_back(r);

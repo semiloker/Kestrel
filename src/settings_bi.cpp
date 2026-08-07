@@ -36,7 +36,7 @@ namespace
     // HUD_M_* enum in hud_bi.h.
     const char *METRIC_KEYS[HUD_M_COUNT] = {
         "fps", "pre", "gpums", "cpu", "gpu", "ram", "commit", "cpuw", "gpuw", "batteryd",
-        "netdown", "netup", "disk", "cputemp", "gputemp", "battemp"};
+        "netdown", "netup", "disk", "cputemp", "gputemp", "battemp", "gpufan"};
     static_assert(sizeof(METRIC_KEYS) / sizeof(METRIC_KEYS[0]) == HUD_M_COUNT,
                   "METRIC_KEYS must have one entry per HUD_M_* metric");
 
@@ -764,6 +764,7 @@ void settings_bi::applyTo(resource_usage_bi *ru, overlay_bi *ov,
         ru->gpuInfo.show_gpuLoad = getBool("gpu.load", ru->gpuInfo.show_gpuLoad);
         ru->gpuInfo.show_vram = getBool("gpu.vram", ru->gpuInfo.show_vram);
         ru->gpuInfo.show_gpuPower = getBool("gpu.power", ru->gpuInfo.show_gpuPower);
+        ru->gpuInfo.show_gpuFan = getBool("gpu.fan", ru->gpuInfo.show_gpuFan);
         ru->gpuInfo.show_adapters = getBool("gpu.adapters", ru->gpuInfo.show_adapters);
 
         int unit = getInt("mem.unit", ru->memUnit);
@@ -903,6 +904,7 @@ void settings_bi::collectStateFrom(const resource_usage_bi *ru, const overlay_bi
         setBool("gpu.load", ru->gpuInfo.show_gpuLoad);
         setBool("gpu.vram", ru->gpuInfo.show_vram);
         setBool("gpu.power", ru->gpuInfo.show_gpuPower);
+        setBool("gpu.fan", ru->gpuInfo.show_gpuFan);
         setBool("gpu.adapters", ru->gpuInfo.show_adapters);
 
         setInt("mem.unit", ru->memUnit);
