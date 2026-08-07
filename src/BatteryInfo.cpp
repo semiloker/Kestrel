@@ -92,6 +92,7 @@ bool batteryinfo_bi::Recover()
     // Covers the battery that is not enumerated yet when we start at logon:
     // Initialize() failed, and these are the only values it would have filled.
     present = true;
+    tempSupported = true;
     if (!info_static.cycleCountValid)
         QueryBatteryCycleCount();
     if (!info_static.manufacturerValid && !info_static.deviceNameValid &&
@@ -119,6 +120,15 @@ bool batteryinfo_bi::TaggedIoctl(DWORD code, void *in, DWORD inSize,
 
     *(ULONG *)in = tag;
     returned = 0;
+    return DeviceIoControl(hBattery, code, in, inSize, out, outSize,
+                           &returned, NULL) != FALSE;
+}
+
+bool batteryinfo_bi::PlainIoctl(DWORD code, void *in, DWORD inSize,
+                                void *out, DWORD outSize)
+{
+    DWORD returned = 0;
+    *(ULONG *)in = tag;
     return DeviceIoControl(hBattery, code, in, inSize, out, outSize,
                            &returned, NULL) != FALSE;
 }
@@ -390,8 +400,8 @@ bool batteryinfo_bi::QueryInfoString(ULONG level, std::string *out)
     // Firmware identity strings are short. The spare trailing element means a
     // pack that fills the buffer still leaves something to terminate on.
     WCHAR buffer[256] = {};
-    if (!TaggedIoctl(IOCTL_BATTERY_QUERY_INFORMATION, &bqi, sizeof(bqi),
-                     buffer, sizeof(buffer) - sizeof(WCHAR)))
+    if (!PlainIoctl(IOCTL_BATTERY_QUERY_INFORMATION, &bqi, sizeof(bqi),
+                    buffer, sizeof(buffer) - sizeof(WCHAR)))
         return false;
 
     size_t len = wcsnlen(buffer, 255);
@@ -407,12 +417,16 @@ bool batteryinfo_bi::QueryInfoString(ULONG level, std::string *out)
 // leaving a stale reading or inventing a room-temperature default.
 bool batteryinfo_bi::QueryBatteryTemperature()
 {
+    if (!tempSupported)
+        return false;
+
     BATTERY_QUERY_INFORMATION bqi = {};
     bqi.InformationLevel = BatteryTemperature;
 
     ULONG deciKelvin = 0;
-    bool ok = TaggedIoctl(IOCTL_BATTERY_QUERY_INFORMATION, &bqi, sizeof(bqi),
-                          &deciKelvin, sizeof(deciKelvin));
+    bool ok = PlainIoctl(IOCTL_BATTERY_QUERY_INFORMATION, &bqi, sizeof(bqi),
+                         &deciKelvin, sizeof(deciKelvin));
+    DWORD err = ok ? 0 : GetLastError();
 
     double celsius = ok ? (deciKelvin / 10.0 - 273.15) : 0.0;
 
@@ -420,6 +434,14 @@ bool batteryinfo_bi::QueryBatteryTemperature()
     // outside this band is reporting a placeholder rather than a temperature.
     if (!ok || deciKelvin == 0 || celsius < -40.0 || celsius > 150.0)
     {
+        if (ok)
+            log_bi::write("battery: temperature level answered %lu dK, not a usable reading",
+                          (unsigned long)deciKelvin);
+        else
+            log_bi::write("battery: firmware does not expose BatteryTemperature (err %lu)",
+                          (unsigned long)err);
+
+        tempSupported = false;
         info_1s.tempValid = false;
         info_1s.tempC = 0.0;
         info_1s.Temperature = "Unknown";
@@ -454,8 +476,9 @@ bool batteryinfo_bi::QueryBatteryIdentity()
     bqi.InformationLevel = BatteryManufactureDate;
     BATTERY_MANUFACTURE_DATE made = {};
 
-    bool dateOk = TaggedIoctl(IOCTL_BATTERY_QUERY_INFORMATION, &bqi, sizeof(bqi),
-                              &made, sizeof(made));
+    bool dateOk = PlainIoctl(IOCTL_BATTERY_QUERY_INFORMATION, &bqi, sizeof(bqi),
+                             &made, sizeof(made));
+    DWORD dateErr = dateOk ? 0 : GetLastError();
 
     if (dateOk && made.Year >= 1980 && made.Month >= 1 && made.Month <= 12 &&
         made.Day >= 1 && made.Day <= 31)
@@ -484,6 +507,13 @@ bool batteryinfo_bi::QueryBatteryIdentity()
     }
     else
     {
+        if (dateOk)
+            log_bi::write("battery: manufacture date reported as %04d-%02d-%02d, out of range",
+                          (int)made.Year, (int)made.Month, (int)made.Day);
+        else
+            log_bi::write("battery: firmware does not expose BatteryManufactureDate (err %lu)",
+                          (unsigned long)dateErr);
+
         info_static.manufactureDateValid = false;
         info_static.ManufactureDate = "Unknown";
         info_static.Age = "Unknown";

@@ -42,12 +42,20 @@ private:
     BATTERY_STATUS bs{};
     ULONG tag;
     ULONGLONG lastRecoverTick = 0;
+    // Cleared the first time the pack refuses to report a temperature, so the
+    // 1 s timer stops asking. Recover() re-arms it: a genuine re-enumeration
+    // can bring a sensor back.
+    bool tempSupported = true;
 
     bool OpenDevice();
     bool Recover();
     // Both battery IOCTL input structs start with the tag, so one wrapper can
     // stamp it, retry after a recovery, and keep the callers unchanged.
     bool TaggedIoctl(DWORD code, void *in, DWORD inSize, void *out, DWORD outSize);
+    // Same call without the recovery retry. An optional info level the firmware
+    // never implemented is not a stale tag, and treating it as one puts
+    // Recover() on a permanent 5 s loop.
+    bool PlainIoctl(DWORD code, void *in, DWORD inSize, void *out, DWORD outSize);
     // The name/serial info levels all return a plain wide string; only the
     // level and the destination differ.
     bool QueryInfoString(ULONG level, std::string *out);

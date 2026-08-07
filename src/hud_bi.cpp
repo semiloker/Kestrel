@@ -197,7 +197,7 @@ hud_bi::hud_bi()
     metrics[HUD_M_CPUW].graph = HUD_G_POWER;
     metrics[HUD_M_CPUW].show = true;
 
-    metrics[HUD_M_GPUW].label = "GPW:";
+    metrics[HUD_M_GPUW].label = "GPU:";
     metrics[HUD_M_GPUW].unit = "W";
     metrics[HUD_M_GPUW].color = HUD_COLOR_CYAN;
     metrics[HUD_M_GPUW].graph = HUD_G_POWER;
@@ -234,21 +234,21 @@ hud_bi::hud_bi()
     metrics[HUD_M_DISK].graph = HUD_G_NONE;
     metrics[HUD_M_DISK].show = false;
 
-    metrics[HUD_M_CPUTEMP].label = "CPT:";
+    metrics[HUD_M_CPUTEMP].label = "CPU:";
     metrics[HUD_M_CPUTEMP].unit = "°C";
     metrics[HUD_M_CPUTEMP].color = HUD_COLOR_ORANGE;
     metrics[HUD_M_CPUTEMP].graph = HUD_G_TEMP;
     metrics[HUD_M_CPUTEMP].show = false;
     metrics[HUD_M_CPUTEMP].graphed = true;
 
-    metrics[HUD_M_GPUTEMP].label = "GPT:";
+    metrics[HUD_M_GPUTEMP].label = "GPU:";
     metrics[HUD_M_GPUTEMP].unit = "°C";
     metrics[HUD_M_GPUTEMP].color = HUD_COLOR_RED;
     metrics[HUD_M_GPUTEMP].graph = HUD_G_TEMP;
     metrics[HUD_M_GPUTEMP].show = false;
     metrics[HUD_M_GPUTEMP].graphed = true;
 
-    metrics[HUD_M_BATTEMP].label = "BaT:";
+    metrics[HUD_M_BATTEMP].label = "Bat:";
     metrics[HUD_M_BATTEMP].unit = "°C";
     metrics[HUD_M_BATTEMP].color = HUD_COLOR_GREEN;
     metrics[HUD_M_BATTEMP].graph = HUD_G_TEMP;

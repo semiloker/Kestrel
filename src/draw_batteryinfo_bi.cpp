@@ -1303,11 +1303,11 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         r = {L"Temperature", &ru->gpuInfo.show_gpuTemp,
              &ov->hud.metrics[HUD_M_GPUTEMP].graphed, MC_GPUMS,
              ru->gpuInfo.gpuTempAvailable,
-             L"GPU die temperature from the display driver (GPT: C)", HUD_M_GPUTEMP};
+             L"GPU die temperature from the display driver (GPU: C)", HUD_M_GPUTEMP};
         out.push_back(r);
         r = {L"Power draw", &ru->gpuInfo.show_gpuPower,
              &ov->hud.metrics[HUD_M_GPUW].graphed, MC_POWER, ru->gpuInfo.gpuPowerAvailable,
-             L"GPU watts from the Energy Meter (GPW:)", HUD_M_GPUW};
+             L"GPU watts from the Energy Meter (GPU: W)", HUD_M_GPUW};
         out.push_back(r);
         r = {L"Adapter name", &ru->gpuInfo.show_gpuName, nullptr, MC_NONE, true,
              L"Graphics card model"};
@@ -1325,8 +1325,8 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
              &ov->hud.metrics[HUD_M_CPUTEMP].graphed, MC_POWER,
              ru->cpuInfo.cpuTempAvailable,
              ru->cpuInfo.cpuTempApproximate
-                 ? L"ACPI zone (CPT: C) - approximate, run Afterburner for the die"
-                 : L"CPU die temperature via MSI Afterburner (CPT: C)",
+                 ? L"ACPI zone (CPU: C) - approximate, run Afterburner for the die"
+                 : L"CPU die temperature via MSI Afterburner (CPU: C)",
              HUD_M_CPUTEMP};
         out.push_back(r);
         r = {L"Package power", &ru->cpuInfo.show_packagePower,
@@ -1376,7 +1376,7 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         r = {L"Temperature", &ov->hud.metrics[HUD_M_BATTEMP].show,
              &ov->hud.metrics[HUD_M_BATTEMP].graphed, MC_POWER,
              bi->present && bi->info_1s.tempValid,
-             L"Battery pack temperature (BaT: C)", HUD_M_BATTEMP};
+             L"Battery pack temperature (Bat: C)", HUD_M_BATTEMP};
         out.push_back(r);
         break;
 
