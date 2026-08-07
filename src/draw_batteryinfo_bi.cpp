@@ -1265,13 +1265,13 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
              L"Monitor, resolution and refresh at the top"};
         out.push_back(r);
         r = {L"Frame time percentiles", &ov->hud.showLows, nullptr, MC_NONE, frameOk,
-             L"Worst-case 1% and 0.1% low FPS (Low:)"};
+             L"Worst-case 1% and 0.1% low FPS (LOW:)"};
         out.push_back(r);
         r = {L"Network speeds", &ov->hud.showNetwork, nullptr, MC_NONE, true,
-             L"Download and upload speeds (Dw:/Up:)"};
+             L"Download and upload speeds (DW:/UP:)"};
         out.push_back(r);
         r = {L"Disk usage", &ov->hud.showDisk, nullptr, MC_NONE, true,
-             L"Disk space used on the system drive (Dsk:)"};
+             L"Disk space used on the system drive (DSK:)"};
         out.push_back(r);
         break;
 
@@ -1282,14 +1282,14 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         out.push_back(r);
         r = {L"Frame interval", &ov->hud.metrics[HUD_M_PRE].show,
              &ov->hud.metrics[HUD_M_PRE].graphed, MC_CPU, frameOk,
-             L"Milliseconds between frames (Pre:)", HUD_M_PRE};
+             L"Milliseconds between frames (PRE:)", HUD_M_PRE};
         out.push_back(r);
         r = {L"GPU milliseconds", &ov->hud.metrics[HUD_M_GPUMS].show,
              &ov->hud.metrics[HUD_M_GPUMS].graphed, MC_GPUMS, frameOk,
              L"GPU render time per frame (GPU: ms)", HUD_M_GPUMS};
         out.push_back(r);
         r = {L"CPU or GPU bound", &ov->hud.showBottleneck, nullptr, MC_NONE, frameOk,
-             L"Which one is capping the frame rate (Bnd:)"};
+             L"Which one is capping the frame rate (BND:)"};
         out.push_back(r);
         break;
 
@@ -1335,10 +1335,10 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         out.push_back(r);
         r = {L"Package power", &ru->cpuInfo.show_packagePower,
              &ov->hud.metrics[HUD_M_CPUW].graphed, MC_POWER, powerOk,
-             L"CPU package watts (CPW:)", HUD_M_CPUW};
+             L"CPU package watts (CPU: W)", HUD_M_CPUW};
         out.push_back(r);
         r = {L"Frames per watt", &ov->hud.showEfficiency, nullptr, MC_POWER,
-             frameOk && powerOk, L"FPS delivered per CPU watt (Eff:)"};
+             frameOk && powerOk, L"FPS delivered per CPU watt (EFF:)"};
         out.push_back(r);
         r = {L"Per-core load", &ru->cpuInfo.show_CoreUsagePercents, nullptr, MC_NONE, true,
              L"Utilisation of each logical core"};
@@ -1347,7 +1347,7 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
              L"CPU model, shown above the adapter"};
         out.push_back(r);
         r = {L"Architecture", &ru->cpuInfo.show_architecture, nullptr, MC_NONE, true,
-             L"Instruction set, e.g. x64 (Arch:)"};
+             L"Instruction set, e.g. x64 (ARCH:)"};
         out.push_back(r);
         break;
 
@@ -1371,16 +1371,16 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
              L"Estimated time to empty or full"};
         out.push_back(r);
         r = {L"Charger deficit warning", &ov->hud.showChargerDeficit, nullptr, MC_NONE,
-             bi->present, L"Warns when the charger cannot keep up (Chg:)"};
+             bi->present, L"Warns when the charger cannot keep up (CHG:)"};
         out.push_back(r);
         r = {L"Power flow graph", &ov->hud.metrics[HUD_M_BATTERYD].show,
              &ov->hud.metrics[HUD_M_BATTERYD].graphed, MC_POWER, bi->present,
-             L"Battery charge/discharge watts (Bat:)", HUD_M_BATTERYD};
+             L"Battery charge/discharge watts (BAT:)", HUD_M_BATTERYD};
         out.push_back(r);
         r = {L"Temperature", &ov->hud.metrics[HUD_M_BATTEMP].show,
              &ov->hud.metrics[HUD_M_BATTEMP].graphed, MC_POWER,
              bi->present && bi->info_1s.tempValid,
-             L"Battery pack temperature (Bat: C)", HUD_M_BATTEMP};
+             L"Battery pack temperature (BAT: C)", HUD_M_BATTEMP};
         out.push_back(r);
         break;
 
@@ -1390,7 +1390,7 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         out.push_back(r);
         r = {L"Commit charge", &ru->ramInfo.show_ullTotalPageFile,
              &ov->hud.metrics[HUD_M_COMMIT].graphed, MC_COMMIT, true,
-             L"Committed memory against the limit (Cmt:)", HUD_M_COMMIT};
+             L"Committed memory against the limit (CMT:)", HUD_M_COMMIT};
         out.push_back(r);
         r = {L"Total physical", &ru->ramInfo.show_ullTotalPhys, nullptr, MC_NONE, true,
              L"Installed RAM"};

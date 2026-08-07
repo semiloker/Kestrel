@@ -9,7 +9,7 @@ rather than complete lists.
 ### Added
 
 - Battery temperature, read from the pack's own sensor, in the Battery tab and
-  as a `Bat:` overlay metric sharing the temperature axis with CPU and GPU.
+  as a `BAT:` overlay metric sharing the temperature axis with CPU and GPU.
   Firmware that does not implement the sensor reports it as unavailable rather
   than showing a number.
 - Battery identity: manufacturer, model, serial and manufacture date, with the

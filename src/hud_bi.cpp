@@ -159,7 +159,7 @@ hud_bi::hud_bi()
     metrics[HUD_M_FPS].show = true;
     metrics[HUD_M_FPS].graphed = true;
 
-    metrics[HUD_M_PRE].label = "Pre:";
+    metrics[HUD_M_PRE].label = "PRE:";
     metrics[HUD_M_PRE].unit = "ms";
     metrics[HUD_M_PRE].color = HUD_COLOR_BLUE;
     metrics[HUD_M_PRE].graph = HUD_G_MS;
@@ -191,7 +191,7 @@ hud_bi::hud_bi()
     metrics[HUD_M_RAM].graph = HUD_G_MEMORY;
     metrics[HUD_M_RAM].graphed = true;
 
-    metrics[HUD_M_CPUW].label = "CPW:";
+    metrics[HUD_M_CPUW].label = "CPU:";
     metrics[HUD_M_CPUW].unit = "W";
     metrics[HUD_M_CPUW].color = HUD_COLOR_ORANGE;
     metrics[HUD_M_CPUW].graph = HUD_G_POWER;
@@ -203,32 +203,32 @@ hud_bi::hud_bi()
     metrics[HUD_M_GPUW].graph = HUD_G_POWER;
     metrics[HUD_M_GPUW].show = false;
 
-    metrics[HUD_M_COMMIT].label = "Cmt:";
+    metrics[HUD_M_COMMIT].label = "CMT:";
     metrics[HUD_M_COMMIT].unit = "%";
     metrics[HUD_M_COMMIT].color = HUD_COLOR_GREEN;
     metrics[HUD_M_COMMIT].graph = HUD_G_MEMORY;
     metrics[HUD_M_COMMIT].graphed = true;
 
-    metrics[HUD_M_BATTERYD].label = "Bat:";
+    metrics[HUD_M_BATTERYD].label = "BAT:";
     metrics[HUD_M_BATTERYD].unit = "W";
     metrics[HUD_M_BATTERYD].color = HUD_COLOR_CYAN;
     metrics[HUD_M_BATTERYD].graph = HUD_G_BATTERY;
     metrics[HUD_M_BATTERYD].show = false;
     metrics[HUD_M_BATTERYD].graphed = true;
 
-    metrics[HUD_M_NETDOWN].label = "Dw:";
+    metrics[HUD_M_NETDOWN].label = "DW:";
     metrics[HUD_M_NETDOWN].unit = "KB/s";
     metrics[HUD_M_NETDOWN].color = HUD_COLOR_CYAN;
     metrics[HUD_M_NETDOWN].graph = HUD_G_NONE;
     metrics[HUD_M_NETDOWN].show = false;
 
-    metrics[HUD_M_NETUP].label = "Up:";
+    metrics[HUD_M_NETUP].label = "UP:";
     metrics[HUD_M_NETUP].unit = "KB/s";
     metrics[HUD_M_NETUP].color = HUD_COLOR_MAGENTA;
     metrics[HUD_M_NETUP].graph = HUD_G_NONE;
     metrics[HUD_M_NETUP].show = false;
 
-    metrics[HUD_M_DISK].label = "Dsk:";
+    metrics[HUD_M_DISK].label = "DSK:";
     metrics[HUD_M_DISK].unit = "%";
     metrics[HUD_M_DISK].color = HUD_COLOR_ORANGE;
     metrics[HUD_M_DISK].graph = HUD_G_NONE;
@@ -248,7 +248,7 @@ hud_bi::hud_bi()
     metrics[HUD_M_GPUTEMP].show = false;
     metrics[HUD_M_GPUTEMP].graphed = true;
 
-    metrics[HUD_M_BATTEMP].label = "Bat:";
+    metrics[HUD_M_BATTEMP].label = "BAT:";
     metrics[HUD_M_BATTEMP].unit = "°C";
     metrics[HUD_M_BATTEMP].color = HUD_COLOR_GREEN;
     metrics[HUD_M_BATTEMP].graph = HUD_G_TEMP;
@@ -600,7 +600,7 @@ void hud_bi::buildLayoutInto(std::vector<hud_element_bi> &out) const
         pushRow(out, n, cpuName, "", HUD_COLOR_WHITE);
 
     if (showCpuArch && !cpuArch.empty())
-        pushRow(out, n, "Arch: " + cpuArch, "", HUD_COLOR_WHITE);
+        pushRow(out, n, "ARCH: " + cpuArch, "", HUD_COLOR_WHITE);
 
     if (showDevice)
         pushRow(out, n, deviceName, resolution, HUD_COLOR_WHITE);
@@ -627,7 +627,7 @@ void hud_bi::buildLayoutInto(std::vector<hud_element_bi> &out) const
                 std::string tenth = (m.available && low01Valid)
                     ? formatFixed(clampDisplay(low01PercentFps), 1) : "-";
 
-                pushRow(out, n, fmtLeft("Low:", "1/0.1", "%"),
+                pushRow(out, n, fmtLeft("LOW:", "1/0.1", "%"),
                         fmtRight(one.c_str(), tenth.c_str()), HUD_COLOR_WHITE);
             }
 
@@ -655,18 +655,18 @@ void hud_bi::buildLayoutInto(std::vector<hud_element_bi> &out) const
                 }
 
                 if (known)
-                    pushRow(out, n, fmtLeftNum("Bnd:", bottleneckRatio * 100.0, 0, "%"),
+                    pushRow(out, n, fmtLeftNum("BND:", bottleneckRatio * 100.0, 0, "%"),
                             fmtRightPhrase(phrase), tone);
                 else
-                    pushRow(out, n, fmtLeft("Bnd:", "-", ""),
+                    pushRow(out, n, fmtLeft("BND:", "-", ""),
                             fmtRightPhrase(phrase), HUD_COLOR_WHITE);
             }
 
             if (i == HUD_M_CPUW && showEfficiency)
             {
                 std::string left = efficiencyValid
-                    ? fmtLeftNum("Eff:", efficiencyFpsPerWatt, 2, "")
-                    : fmtLeft("Eff:", "-", "");
+                    ? fmtLeftNum("EFF:", efficiencyFpsPerWatt, 2, "")
+                    : fmtLeft("EFF:", "-", "");
 
                 pushRow(out, n, left, fmtRightPhrase("frames per W"), HUD_COLOR_ORANGE);
             }
@@ -693,11 +693,11 @@ void hud_bi::buildLayoutInto(std::vector<hud_element_bi> &out) const
     if (showMem)
     {
         if (memTotalGB > 0.0)
-            pushRow(out, n, fmtLeftNum("Mem:", memUsedGB, 2, "GB"),
+            pushRow(out, n, fmtLeftNum("MEM:", memUsedGB, 2, "GB"),
                     fmtRightTotalPct(memTotalGB, 2, (memUsedGB / memTotalGB) * 100.0),
                     HUD_COLOR_WHITE);
         else
-            pushRow(out, n, fmtLeftNum("Mem:", memUsedGB, 2, "GB"),
+            pushRow(out, n, fmtLeftNum("MEM:", memUsedGB, 2, "GB"),
                     fmtRight("-", "-"), HUD_COLOR_WHITE);
     }
 
@@ -723,7 +723,7 @@ void hud_bi::buildLayoutInto(std::vector<hud_element_bi> &out) const
 
     if (showChargerDeficit && chargerDeficit)
     {
-        pushRow(out, n, fmtLeftNum("Chg:", chargerDeficitW, 1, "W"),
+        pushRow(out, n, fmtLeftNum("CHG:", chargerDeficitW, 1, "W"),
                 fmtRightPhrase("charger short"), HUD_COLOR_RED);
     }
 
@@ -740,11 +740,11 @@ void hud_bi::buildLayoutInto(std::vector<hud_element_bi> &out) const
     if (showDisk && diskAvailable)
     {
         if (diskTotalGB > 0.0)
-            pushRow(out, n, fmtLeftNum("Dsk:", diskUsedGB, 1, "GB"),
+            pushRow(out, n, fmtLeftNum("DSK:", diskUsedGB, 1, "GB"),
                     fmtRightTotalPct(diskTotalGB, 1, (diskUsedGB / diskTotalGB) * 100.0),
                     HUD_COLOR_ORANGE);
         else
-            pushRow(out, n, fmtLeftNum("Dsk:", diskUsedGB, 1, "GB"),
+            pushRow(out, n, fmtLeftNum("DSK:", diskUsedGB, 1, "GB"),
                     fmtRight("-", "-"), HUD_COLOR_ORANGE);
     }
 
