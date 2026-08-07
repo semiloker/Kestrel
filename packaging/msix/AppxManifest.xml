@@ -11,7 +11,7 @@
   <Identity
     Name="ASSLStudio.KestrelApp"
     Publisher="CN=35C83A06-0225-4530-A088-4C0C0BBBF674"
-    Version="1.4.4.0"
+    Version="1.5.0.0"
     ProcessorArchitecture="x64" />
 
   <Properties>

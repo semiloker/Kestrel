@@ -2,6 +2,7 @@
 
 #include <windows.h>
 #include <cstdarg>
+#include <cstdio>
 #include <deque>
 #include <string>
 #include <vector>
@@ -35,6 +36,16 @@ namespace paths_bi
     {
         static const std::wstring unavailable;
         return unavailable;
+    }
+
+    // capture_bi shares the hardened append with battery_history_bi rather than
+    // keeping a private copy. Refusing to open keeps these tests off the disk,
+    // which is the point of the adapters above.
+    FILE *openRegularAppend(const std::wstring &, bool *emptyOut)
+    {
+        if (emptyOut)
+            *emptyOut = false;
+        return NULL;
     }
 }
 

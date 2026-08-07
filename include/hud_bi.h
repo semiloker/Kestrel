@@ -91,8 +91,18 @@ enum hud_metric_id_bi
     // Appended, never inserted: hud.metricOrder persists these as raw indices.
     HUD_M_CPUTEMP,
     HUD_M_GPUTEMP,
+    HUD_M_BATTEMP,
+    HUD_M_GPUFAN,
     HUD_M_COUNT
 };
+
+// Parses a persisted hud.metricOrder value into `out`. Returns false when the
+// text is malformed - a bad token, an id outside the enum, or a duplicate - in
+// which case `out` is cleared and the caller should fall back to the default
+// order. A valid but short order, written by a build that had fewer metrics,
+// is completed with the missing ids in enum order: appending a metric must not
+// discard the arrangement the user chose.
+bool hud_parseMetricOrder(const std::string &text, std::vector<int> &out);
 
 // One plot per unit, drawn in this order. Frame rate is deliberately not part
 // of HUD_G_MS: a 144 fps trace shares no axis with a 7 ms frame interval, and

@@ -54,7 +54,6 @@ public:
         HIT_USERPRESET_APPLY,
         HIT_USERPRESET_SAVE,
         HIT_ACTION,
-        HIT_SEARCH,
         HIT_MOVEUP,
         HIT_MOVEDOWN,
         HIT_GRAPHHEIGHT,
@@ -88,6 +87,7 @@ public:
         double liveLow1 = 0.0;
         bool liveLow1Valid = false;
         bool hasLast = false;
+        bool finalizeFailed = false;
         capture_bi::summary_bi last;
         std::vector<capture_bi::summary_bi> history;
     };
@@ -239,9 +239,6 @@ public:
     float viewHeight = 0.0f;
 
     float tabScroll[TAB_COUNT] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-
-    std::string searchQuery;
-    bool searchFocused = false;
 
     void clearLayoutCache();
     void setDWriteFactory(IDWriteFactory *factory) { dwriteFactory = factory; }

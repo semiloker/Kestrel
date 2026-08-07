@@ -363,6 +363,9 @@ bool win_bi::Create(int nCmdShow, bool startInTray)
 
     i18n_bi::load(settings.getString("ui.language", "en"));
 
+    batteryHistory.setEnabled(settings.getBool("battery.history", true));
+    batteryHistory.setIntervalMinutes(settings.getInt("battery.historyMinutes", 5));
+
     updater.reset(new update_bi());
 
     etwTrace.reset(new etw_bi());
@@ -537,9 +540,6 @@ LRESULT CALLBACK win_bi::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         break;
     case WM_SYSCOMMAND:
         pThis->OnSysCommand(wParam, lParam);
-        break;
-    case WM_CHAR:
-        pThis->OnChar(wParam);
         break;
     case WM_CLOSE:
         pThis->OnClose();
@@ -1008,6 +1008,7 @@ draw_batteryinfo_bi::capture_view_bi win_bi::BuildCaptureView()
     view.liveLow1Valid = captureMgr.getCapture().liveLow1Valid();
 
     view.hasLast = captureMgr.hasLastSummary();
+    view.finalizeFailed = captureMgr.finalizeFailed();
     view.last = captureMgr.lastSummary();
 
     captureMgr.loadHistory();
@@ -1168,6 +1169,15 @@ void win_bi::UpdateOverlayHud()
     if (ru_bi->gpuInfo.gpuTempAvailable)
         ov_bi->hud.push(HUD_M_GPUTEMP, ru_bi->gpuInfo.gpuTempC);
 
+    ov_bi->hud.metrics[HUD_M_BATTEMP].available =
+        bi_bi->present && bi_bi->info_1s.tempValid;
+    if (bi_bi->present && bi_bi->info_1s.tempValid)
+        ov_bi->hud.push(HUD_M_BATTEMP, bi_bi->info_1s.tempC);
+
+    ov_bi->hud.metrics[HUD_M_GPUFAN].available = ru_bi->gpuInfo.gpuFanAvailable;
+    if (ru_bi->gpuInfo.gpuFanAvailable)
+        ov_bi->hud.push(HUD_M_GPUFAN, ru_bi->gpuInfo.gpuFanRpm);
+
     ov_bi->hud.push(HUD_M_CPU, snapCpu.UsageValue);
     ov_bi->hud.push(HUD_M_GPU, snapGpu.gpuLoadValue);
     ov_bi->hud.push(HUD_M_RAM, snapRam.loadValue);
@@ -1183,6 +1193,7 @@ void win_bi::UpdateOverlayHud()
     ov_bi->hud.metrics[HUD_M_GPUW].show = ru_bi->gpuInfo.show_gpuPower;
     ov_bi->hud.metrics[HUD_M_CPUTEMP].show = ru_bi->cpuInfo.show_cpuTemp;
     ov_bi->hud.metrics[HUD_M_GPUTEMP].show = ru_bi->gpuInfo.show_gpuTemp;
+    ov_bi->hud.metrics[HUD_M_GPUFAN].show = ru_bi->gpuInfo.show_gpuFan;
     ov_bi->hud.showDevice = ru_bi->gpuInfo.show_gpuName;
     ov_bi->hud.showMem = ru_bi->ramInfo.show_ullTotalPhys;
 
@@ -1202,28 +1213,30 @@ void win_bi::UpdateOverlayHud()
     // rebind them to unrelated CPU/RAM toggles.
     if (ov_bi->hud.showNetwork)
     {
-        if (!ru_bi->networkInfo.empty())
+        // An interface with no previous sample formats as "-", and running
+        // that back through atof() produced a confident 0.0 KB/s for a speed
+        // nobody had measured - exactly the plausible-looking zero the README
+        // promises never to print. Sum only interfaces that actually measured.
+        double totalDown = 0.0, totalUp = 0.0;
+        bool anyMeasured = false;
+        for (size_t i = 0; i < ru_bi->networkInfo.size(); ++i)
         {
-            double totalDown = 0.0, totalUp = 0.0;
-            for (size_t i = 0; i < ru_bi->networkInfo.size(); ++i)
-            {
-                const char *ds = ru_bi->networkInfo[i].downloadSpeed.c_str();
-                const char *us = ru_bi->networkInfo[i].uploadSpeed.c_str();
-                totalDown += atof(ds);
-                totalUp += atof(us);
-            }
+            if (!ru_bi->networkInfo[i].speedValid)
+                continue;
+            totalDown += ru_bi->networkInfo[i].downKBs;
+            totalUp += ru_bi->networkInfo[i].upKBs;
+            anyMeasured = true;
+        }
+
+        if (anyMeasured)
+        {
             ov_bi->hud.netDownKBs = totalDown;
             ov_bi->hud.netUpKBs = totalUp;
             ov_bi->hud.push(HUD_M_NETDOWN, totalDown);
             ov_bi->hud.push(HUD_M_NETUP, totalUp);
-            ov_bi->hud.metrics[HUD_M_NETDOWN].available = true;
-            ov_bi->hud.metrics[HUD_M_NETUP].available = true;
         }
-        else
-        {
-            ov_bi->hud.metrics[HUD_M_NETDOWN].available = false;
-            ov_bi->hud.metrics[HUD_M_NETUP].available = false;
-        }
+        ov_bi->hud.metrics[HUD_M_NETDOWN].available = anyMeasured;
+        ov_bi->hud.metrics[HUD_M_NETUP].available = anyMeasured;
     }
 
     if (ov_bi->hud.showDisk && !ru_bi->disksInfo.empty())
@@ -1665,13 +1678,25 @@ void win_bi::OnTimer(WPARAM wParam)
     switch (wParam)
     {
     case 1:
-        bi_bi->QueryBatteryInfo();
-        bi_bi->QueryBatteryStatus();
+    {
+        // 1.4.4 taught TaggedIoctl to re-acquire the tag, but the timer still
+        // threw the answer away: when Recover() also fails - battery pulled,
+        // driver gone for good - the readings stayed frozen on their last good
+        // values. present is what every battery row and the HUD metric gate on,
+        // so clearing it is what turns them back into dashes. Both queries run
+        // regardless; short-circuiting would skip the second one's recovery.
+        bool infoOk = bi_bi->QueryBatteryInfo();
+        bool statusOk = bi_bi->QueryBatteryStatus();
+        bi_bi->present = infoOk && statusOk;
+        bi_bi->QueryBatteryTemperature();
+        batteryHistory.tick(bi_bi.get());
+
         UpdateTrayTooltip();
 
         if (IsWindowVisible(hwnd))
             InvalidateRect(hwnd, NULL, true);
         break;
+    }
 
     case 2:
         bi_bi->QueryBatteryRemaining();
@@ -1772,31 +1797,6 @@ void win_bi::OnSysCommand(WPARAM wParam, LPARAM lParam)
     DefWindowProc(hwnd, WM_SYSCOMMAND, wParam, lParam);
 }
 
-void win_bi::OnChar(WPARAM wParam)
-{
-    if (!draw_bibi_bi || !draw_bibi_bi->searchFocused)
-        return;
-
-    char c = (char)wParam;
-
-    if (c == '\b')
-    {
-        if (!draw_bibi_bi->searchQuery.empty())
-            draw_bibi_bi->searchQuery.pop_back();
-    }
-    else if (c == 27)
-    {
-        draw_bibi_bi->searchFocused = false;
-        draw_bibi_bi->searchQuery.clear();
-    }
-    else if (c >= 32 && c < 127)
-    {
-        draw_bibi_bi->searchQuery += c;
-    }
-
-    InvalidateRect(hwnd, NULL, FALSE);
-}
-
 void win_bi::OnGetMinMaxInfo(LPARAM lParam)
 {
     float scale = (float)dpi_bi::forWindow(hwnd) / 96.0f;
@@ -1814,6 +1814,8 @@ void win_bi::OnGetMinMaxInfo(LPARAM lParam)
 void win_bi::SaveSettings()
 {
     settings.collectFrom(ru_bi.get(), ov_bi.get(), draw_bibi_bi.get(), bi_bi.get());
+    settings.setBool("battery.history", batteryHistory.isEnabled());
+    settings.setInt("battery.historyMinutes", batteryHistory.getIntervalMinutes());
     if (auto r = settings.save(); !r.ok())
         log_bi::write("settings: %s", r.error().c_str());
 }

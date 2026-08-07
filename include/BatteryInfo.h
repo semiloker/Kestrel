@@ -22,10 +22,6 @@
 
 #include "interfaces_bi.h"
 
-#ifndef BatteryCycleCount
-    #define BatteryCycleCount ((BATTERY_QUERY_INFORMATION_LEVEL)6)
-#endif
-
 template<typename T>
 T clamp(T value, T min, T max)
 {
@@ -37,15 +33,6 @@ T clamp(T value, T min, T max)
 DEFINE_GUID(GUID_DEVINTERFACE_BATTERY,
 0x72631e54, 0x78a4, 0x11d0, 0xbc, 0xf7, 0x00, 0xaa, 0x00, 0xb7, 0xb3, 0x2a);
 
-DEFINE_GUID(GUID_BATTERY_WMI_CYCLE_COUNT,
-    0x2a2d7d6d, 0x8f1f, 0x457c, 0x9e, 0x1c, 0x3d, 0x7a, 0x2c, 0x91, 0x1d, 0x28);
-
-typedef struct _BATTERY_WMI_CYCLE_COUNT
-{
-    ULONG Tag;
-    ULONG CycleCount;
-} BATTERY_WMI_CYCLE_COUNT, *PBATTERY_WMI_CYCLE_COUNT;
-
 class batteryinfo_bi : public IBatteryInfo
 {
 private:
@@ -55,12 +42,23 @@ private:
     BATTERY_STATUS bs{};
     ULONG tag;
     ULONGLONG lastRecoverTick = 0;
+    // Cleared the first time the pack refuses to report a temperature, so the
+    // 1 s timer stops asking. Recover() re-arms it: a genuine re-enumeration
+    // can bring a sensor back.
+    bool tempSupported = true;
 
     bool OpenDevice();
     bool Recover();
     // Both battery IOCTL input structs start with the tag, so one wrapper can
     // stamp it, retry after a recovery, and keep the callers unchanged.
     bool TaggedIoctl(DWORD code, void *in, DWORD inSize, void *out, DWORD outSize);
+    // Same call without the recovery retry. An optional info level the firmware
+    // never implemented is not a stale tag, and treating it as one puts
+    // Recover() on a permanent 5 s loop.
+    bool PlainIoctl(DWORD code, void *in, DWORD inSize, void *out, DWORD outSize);
+    // The name/serial info levels all return a plain wide string; only the
+    // level and the destination differ.
+    bool QueryInfoString(ULONG level, std::string *out);
 
 public:
     using bi_struct_static = IBatteryInfo::bi_struct_static;
@@ -93,6 +91,8 @@ public:
     bool QueryBatteryStatus() override;
     bool QueryBatteryRemaining() override;
     bool QueryBatteryCycleCount() override;
+    bool QueryBatteryTemperature() override;
+    bool QueryBatteryIdentity() override;
 
     void PrintAllConsole() const;
 };

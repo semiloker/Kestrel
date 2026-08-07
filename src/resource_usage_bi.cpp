@@ -222,6 +222,9 @@ bool resource_usage_bi::updateNetworkInto(std::vector<NetworkInfo> &network)
 
             netInfo.downloadSpeed = std::format("{:.1f} KB/s", down);
             netInfo.uploadSpeed = std::format("{:.1f} KB/s", up);
+            netInfo.downKBs = down;
+            netInfo.upKBs = up;
+            netInfo.speedValid = true;
         }
         else
         {
@@ -1325,6 +1328,9 @@ bool resource_usage_bi::updateTemps()
         cpuInfo.cpuTempApproximate = sampledCpu.cpuTempApproximate;
         gpuInfo.gpuTempC = sampledGpu.gpuTempC;
         gpuInfo.gpuTempAvailable = sampledGpu.gpuTempAvailable;
+        gpuInfo.gpuFanRpm = sampledGpu.gpuFanRpm;
+        gpuInfo.gpuFanMaxRpm = sampledGpu.gpuFanMaxRpm;
+        gpuInfo.gpuFanAvailable = sampledGpu.gpuFanAvailable;
         return cpuInfo.cpuTempAvailable || gpuInfo.gpuTempAvailable;
     }
 
@@ -1348,6 +1354,9 @@ bool resource_usage_bi::updateTemps()
     pubCpu.cpuTempApproximate = cpuInfo.cpuTempApproximate;
     pubGpu.gpuTempC = gpuInfo.gpuTempC;
     pubGpu.gpuTempAvailable = gpuInfo.gpuTempAvailable;
+    pubGpu.gpuFanRpm = gpuInfo.gpuFanRpm;
+    pubGpu.gpuFanMaxRpm = gpuInfo.gpuFanMaxRpm;
+    pubGpu.gpuFanAvailable = gpuInfo.gpuFanAvailable;
     LeaveCriticalSection(&publishLock);
 
     LeaveCriticalSection(&sampleLock);
@@ -1363,18 +1372,26 @@ bool resource_usage_bi::updateTempsInto(CpuInfo &cpu, GpuInfo &gpuInfoSample)
 {
     cpu.cpuTempAvailable = false;
     gpuInfoSample.gpuTempAvailable = false;
+    gpuInfoSample.gpuFanAvailable = false;
 
     gpu_sensor_bi::reading_bi gpuReading;
+    // ponytail: fan rides along with the temperature read, so a card that
+    // exposes a fan but no plausible temperature reports neither. Split the
+    // query only if such a card actually turns up.
     if (gpuSensor.readTemperature(&gpuReading))
     {
         gpuInfoSample.gpuTempC = gpuReading.temperatureC;
         gpuInfoSample.gpuTempAvailable = true;
+        gpuInfoSample.gpuFanRpm = gpuReading.fanRpm;
+        gpuInfoSample.gpuFanMaxRpm = gpuReading.fanMaxRpm;
+        gpuInfoSample.gpuFanAvailable = gpuReading.fanValid;
 
         if (!gpuTempLogged)
         {
-            log_bi::write("temps: gpu from %s on '%s', %.1f C (limit %.0f C)",
+            log_bi::write("temps: gpu from %s on '%s', %.1f C (limit %.0f C), fan %s",
                           gpuReading.source, gpuReading.adapterName.c_str(),
-                          gpuReading.temperatureC, gpuReading.temperatureMaxC);
+                          gpuReading.temperatureC, gpuReading.temperatureMaxC,
+                          gpuReading.fanValid ? "reported" : "not reported");
             gpuTempLogged = true;
         }
     }

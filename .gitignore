@@ -9,3 +9,4 @@ build-*/
 *.d
 packaging/msix/stage/
 packaging/msix/*.msix
+__pycache__/

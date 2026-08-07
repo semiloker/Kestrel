@@ -1141,7 +1141,7 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
         bool missing;
     };
 
-    detail_cell details[6] = {
+    detail_cell details[7] = {
         {L"CHEMISTRY", widen(bi->info_static.Chemistry), false},
         {L"POWER STATE", bi->info_1s.onLine ? L"On mains" : L"On battery", false},
         {L"VOLTAGE",
@@ -1150,13 +1150,17 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
         {L"POWER DRAW",
          bi->info_1s.rateValid ? wfmt(L"%.2f W", bi->info_1s.rateW) : L"\u2014",
          !bi->info_1s.rateValid},
+        {L"TEMPERATURE",
+         bi->info_1s.tempValid ? wfmt(L"%.1f \u00B0C", bi->info_1s.tempC) : L"\u2014",
+         !bi->info_1s.tempValid},
         {L"TIME TO EMPTY", minutesText(bi->info_10s.minutesToEmpty),
          bi->info_10s.minutesToEmpty < 0},
         {L"TIME TO FULL", minutesText(bi->info_10s.minutesToFull),
          bi->info_10s.minutesToFull < 0}};
 
+    const int detailCount = (int)(sizeof(details) / sizeof(details[0]));
     int cols = (IW > 660.0f) ? 3 : 2;
-    int detailRows = (6 + cols - 1) / cols;
+    int detailRows = (detailCount + cols - 1) / cols;
 
     float gap = 16.0f;
     float colW = (IW - gap * (float)(cols - 1)) / (float)cols;
@@ -1165,7 +1169,7 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
     card(L, y, R, y + detailH);
     eyebrow(dw, IX, y + 16.0f, L"DETAILS");
 
-    for (int i = 0; i < 6; ++i)
+    for (int i = 0; i < detailCount; ++i)
     {
         float cx = IX + (float)(i % cols) * (colW + gap);
         float cy = y + 41.0f + (float)(i / cols) * 48.0f;
@@ -1195,7 +1199,45 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
         alerts ? wfmt(L"%.1f Wh", bi->info_static.alert2Wh) : L"Not set",
         DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-    y += 124.0f + PAD;
+    y += 124.0f + CARD_GAP;
+
+    // Firmware identity. Age is the one number here that earns its place: it is
+    // what makes a wear percentage mean something.
+    detail_cell identity[5] = {
+        {L"MANUFACTURER",
+         bi->info_static.manufacturerValid ? widen(bi->info_static.Manufacturer) : L"\u2014",
+         !bi->info_static.manufacturerValid},
+        {L"MODEL",
+         bi->info_static.deviceNameValid ? widen(bi->info_static.DeviceName) : L"\u2014",
+         !bi->info_static.deviceNameValid},
+        {L"SERIAL",
+         bi->info_static.serialValid ? widen(bi->info_static.SerialNumber) : L"\u2014",
+         !bi->info_static.serialValid},
+        {L"MANUFACTURED",
+         bi->info_static.manufactureDateValid ? widen(bi->info_static.ManufactureDate) : L"\u2014",
+         !bi->info_static.manufactureDateValid},
+        {L"AGE",
+         bi->info_static.manufactureDateValid ? widen(bi->info_static.Age) : L"\u2014",
+         !bi->info_static.manufactureDateValid}};
+
+    const int identityCount = (int)(sizeof(identity) / sizeof(identity[0]));
+    int idCols = (IW > 660.0f) ? 3 : 2;
+    int idRows = (identityCount + idCols - 1) / idCols;
+    float idColW = (IW - gap * (float)(idCols - 1)) / (float)idCols;
+    float identityH = 41.0f + (float)idRows * 48.0f + 14.0f;
+
+    card(L, y, R, y + identityH);
+    eyebrow(dw, IX, y + 16.0f, L"BATTERY");
+
+    for (int i = 0; i < identityCount; ++i)
+    {
+        float cx = IX + (float)(i % idCols) * (idColW + gap);
+        float cy = y + 41.0f + (float)(i / idCols) * 48.0f;
+
+        statCell(dw, cx, cy, idColW, identity[i].label, identity[i].value, identity[i].missing);
+    }
+
+    y += identityH + PAD;
 
     contentHeight = y + scrollOffsetY + FOOTER_H;
     clampScroll();
@@ -1223,13 +1265,13 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
              L"Monitor, resolution and refresh at the top"};
         out.push_back(r);
         r = {L"Frame time percentiles", &ov->hud.showLows, nullptr, MC_NONE, frameOk,
-             L"Worst-case 1% and 0.1% low FPS (Low:)"};
+             L"Worst-case 1% and 0.1% low FPS (LOW:)"};
         out.push_back(r);
         r = {L"Network speeds", &ov->hud.showNetwork, nullptr, MC_NONE, true,
-             L"Download and upload speeds (Dw:/Up:)"};
+             L"Download and upload speeds (DW:/UP:)"};
         out.push_back(r);
         r = {L"Disk usage", &ov->hud.showDisk, nullptr, MC_NONE, true,
-             L"Disk space used on the system drive (Dsk:)"};
+             L"Disk space used on the system drive (DSK:)"};
         out.push_back(r);
         break;
 
@@ -1240,14 +1282,14 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         out.push_back(r);
         r = {L"Frame interval", &ov->hud.metrics[HUD_M_PRE].show,
              &ov->hud.metrics[HUD_M_PRE].graphed, MC_CPU, frameOk,
-             L"Milliseconds between frames (Pre:)", HUD_M_PRE};
+             L"Milliseconds between frames (PRE:)", HUD_M_PRE};
         out.push_back(r);
         r = {L"GPU milliseconds", &ov->hud.metrics[HUD_M_GPUMS].show,
              &ov->hud.metrics[HUD_M_GPUMS].graphed, MC_GPUMS, frameOk,
              L"GPU render time per frame (GPU: ms)", HUD_M_GPUMS};
         out.push_back(r);
         r = {L"CPU or GPU bound", &ov->hud.showBottleneck, nullptr, MC_NONE, frameOk,
-             L"Which one is capping the frame rate (Bnd:)"};
+             L"Which one is capping the frame rate (BND:)"};
         out.push_back(r);
         break;
 
@@ -1261,11 +1303,15 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         r = {L"Temperature", &ru->gpuInfo.show_gpuTemp,
              &ov->hud.metrics[HUD_M_GPUTEMP].graphed, MC_GPUMS,
              ru->gpuInfo.gpuTempAvailable,
-             L"GPU die temperature from the display driver (GPT: C)", HUD_M_GPUTEMP};
+             L"GPU die temperature from the display driver (GPU: C)", HUD_M_GPUTEMP};
         out.push_back(r);
         r = {L"Power draw", &ru->gpuInfo.show_gpuPower,
              &ov->hud.metrics[HUD_M_GPUW].graphed, MC_POWER, ru->gpuInfo.gpuPowerAvailable,
-             L"GPU watts from the Energy Meter (GPW:)", HUD_M_GPUW};
+             L"GPU watts from the Energy Meter (GPU: W)", HUD_M_GPUW};
+        out.push_back(r);
+        r = {L"Fan speed", &ru->gpuInfo.show_gpuFan,
+             nullptr, MC_NONE, ru->gpuInfo.gpuFanAvailable,
+             L"Graphics card fan speed (GPU: RPM)", HUD_M_GPUFAN};
         out.push_back(r);
         r = {L"Adapter name", &ru->gpuInfo.show_gpuName, nullptr, MC_NONE, true,
              L"Graphics card model"};
@@ -1283,16 +1329,16 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
              &ov->hud.metrics[HUD_M_CPUTEMP].graphed, MC_POWER,
              ru->cpuInfo.cpuTempAvailable,
              ru->cpuInfo.cpuTempApproximate
-                 ? L"ACPI zone (CPT: C) - approximate, run Afterburner for the die"
-                 : L"CPU die temperature via MSI Afterburner (CPT: C)",
+                 ? L"ACPI zone (CPU: C) - approximate, run Afterburner for the die"
+                 : L"CPU die temperature via MSI Afterburner (CPU: C)",
              HUD_M_CPUTEMP};
         out.push_back(r);
         r = {L"Package power", &ru->cpuInfo.show_packagePower,
              &ov->hud.metrics[HUD_M_CPUW].graphed, MC_POWER, powerOk,
-             L"CPU package watts (CPW:)", HUD_M_CPUW};
+             L"CPU package watts (CPU: W)", HUD_M_CPUW};
         out.push_back(r);
         r = {L"Frames per watt", &ov->hud.showEfficiency, nullptr, MC_POWER,
-             frameOk && powerOk, L"FPS delivered per CPU watt (Eff:)"};
+             frameOk && powerOk, L"FPS delivered per CPU watt (EFF:)"};
         out.push_back(r);
         r = {L"Per-core load", &ru->cpuInfo.show_CoreUsagePercents, nullptr, MC_NONE, true,
              L"Utilisation of each logical core"};
@@ -1301,7 +1347,7 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
              L"CPU model, shown above the adapter"};
         out.push_back(r);
         r = {L"Architecture", &ru->cpuInfo.show_architecture, nullptr, MC_NONE, true,
-             L"Instruction set, e.g. x64 (Arch:)"};
+             L"Instruction set, e.g. x64 (ARCH:)"};
         out.push_back(r);
         break;
 
@@ -1325,11 +1371,16 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
              L"Estimated time to empty or full"};
         out.push_back(r);
         r = {L"Charger deficit warning", &ov->hud.showChargerDeficit, nullptr, MC_NONE,
-             bi->present, L"Warns when the charger cannot keep up (Chg:)"};
+             bi->present, L"Warns when the charger cannot keep up (CHG:)"};
         out.push_back(r);
         r = {L"Power flow graph", &ov->hud.metrics[HUD_M_BATTERYD].show,
              &ov->hud.metrics[HUD_M_BATTERYD].graphed, MC_POWER, bi->present,
-             L"Battery charge/discharge watts (Bat:)", HUD_M_BATTERYD};
+             L"Battery charge/discharge watts (BAT:)", HUD_M_BATTERYD};
+        out.push_back(r);
+        r = {L"Temperature", &ov->hud.metrics[HUD_M_BATTEMP].show,
+             &ov->hud.metrics[HUD_M_BATTEMP].graphed, MC_POWER,
+             bi->present && bi->info_1s.tempValid,
+             L"Battery pack temperature (BAT: C)", HUD_M_BATTEMP};
         out.push_back(r);
         break;
 
@@ -1339,7 +1390,7 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
         out.push_back(r);
         r = {L"Commit charge", &ru->ramInfo.show_ullTotalPageFile,
              &ov->hud.metrics[HUD_M_COMMIT].graphed, MC_COMMIT, true,
-             L"Committed memory against the limit (Cmt:)", HUD_M_COMMIT};
+             L"Committed memory against the limit (CMT:)", HUD_M_COMMIT};
         out.push_back(r);
         r = {L"Total physical", &ru->ramInfo.show_ullTotalPhys, nullptr, MC_NONE, true,
              L"Installed RAM"};
@@ -1381,36 +1432,6 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
              L"Let mouse clicks pass through the overlay (toggle off to interact)"};
         out.push_back(r);
         break;
-    }
-
-    if (!searchQuery.empty())
-    {
-        std::string lowerQuery;
-        for (size_t i = 0; i < searchQuery.size(); ++i)
-            lowerQuery += (char)tolower((unsigned char)searchQuery[i]);
-
-        for (size_t i = 0; i < out.size();)
-        {
-            std::wstring wlabel(out[i].label);
-            std::string label;
-            for (size_t j = 0; j < wlabel.size(); ++j)
-                label += (char)tolower((unsigned char)wlabel[j]);
-
-            std::wstring wdesc(out[i].desc);
-            std::string desc;
-            for (size_t j = 0; j < wdesc.size(); ++j)
-                desc += (char)tolower((unsigned char)wdesc[j]);
-
-            if (label.find(lowerQuery) == std::string::npos &&
-                desc.find(lowerQuery) == std::string::npos)
-            {
-                out.erase(out.begin() + i);
-            }
-            else
-            {
-                ++i;
-            }
-        }
     }
 
     return (int)out.size();
@@ -2018,29 +2039,6 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
 
     y += 28.0f + CARD_GAP;
 
-    // Search bar temporarily disabled (UX-03). Re-enable by restoring this block;
-    // it also drove searchQuery filtering in buildGroupRows.
-#if 0
-    float searchLeft = L + RAIL_W + 18.0f;
-    float searchRight = R;
-    float searchH = 30.0f;
-    bool searchHot = isHovered(HIT_SEARCH, 0);
-    D2D1_COLOR_F searchBg = searchFocused ? pal.inset : pal.surface;
-    fillRR(searchLeft, y, searchRight, y + searchH, BTN_R, searchBg);
-    strokeRR(searchLeft, y, searchRight, y + searchH, BTN_R,
-             searchFocused ? accentColor : (searchHot ? pal.faint : pal.border), 1.0f);
-    txt(dw->pTextFormatLabel, searchLeft + 8.0f, y, searchRight - 8.0f, y + searchH,
-        searchFocused ? pal.text : pal.muted,
-        searchFocused ? std::wstring(L"") :
-        (searchQuery.empty() ? L"Search settings..." :
-                               wfmt(L"%hs", searchQuery.c_str())));
-    if (searchFocused)
-        txt(dw->pTextFormatLabel, searchLeft + 8.0f, y, searchRight - 8.0f, y + searchH,
-            pal.text, wfmt(L"%hs|", searchQuery.c_str()));
-    pushHit(D2D1::RectF(searchLeft, y, searchRight, y + searchH), HIT_SEARCH, 0, nullptr);
-    y += searchH + CARD_GAP;
-#endif
-
     float railTop = y;
     D2D1_COLOR_F active = accentText();
 
@@ -2490,6 +2488,16 @@ void draw_batteryinfo_bi::drawCaptureTab(ID2D1HwndRenderTarget *pRT, init_dwrite
             L"The frame CSV and summary are being written in the background.");
 
         button(dw, IX, y + 80.0f, 160.0f, L"Please wait", false, false);
+    }
+    else if (cap.finalizeFailed)
+    {
+        txt(dw->pTextFormatStrong, IX, y + 32.0f, IR, y + 52.0f, pal.bad,
+            L"The last run could not be saved");
+        txt(dw->pTextFormatSmall, IX, y + 54.0f, IR, y + 72.0f, pal.muted,
+            L"Nothing reached the captures folder. kestrel.log records why.");
+
+        button(dw, IX, y + 80.0f, 160.0f, L"Start recording", true,
+               isHovered(HIT_ACTION, ACT_TOGGLE_CAPTURE));
     }
     else
     {
@@ -3201,13 +3209,6 @@ draw_batteryinfo_bi::click_result_bi draw_batteryinfo_bi::handleClick(POINT curs
 
         case HIT_RAIL:
             setSettingsGroup(h.index);
-            break;
-
-        case HIT_SEARCH:
-            searchFocused = !searchFocused;
-            if (!searchFocused)
-                searchQuery.clear();
-            result.needsSave = true;
             break;
 
         case HIT_PRESET:

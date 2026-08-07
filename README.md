@@ -107,8 +107,10 @@ alongside Kestrel.
   actually bought you anything
 - GPU utilisation and per-process GPU time
 - **Video memory in use against the adapter's capacity**
-- CPU and GPU temperature, shown as `CPT` and `GPT`. Read
-  [Temperatures](#temperatures) before trusting the CPU figure
+- GPU fan speed in RPM, read from the same driver block as the temperature
+- CPU and GPU temperature. Every reading is labelled by the chip it came from,
+  so `GPU:` covers load, watts, temperature and fan, told apart by their units.
+  Read [Temperatures](#temperatures) before trusting the CPU figure
 - Physical memory and commit charge
 - Display resolution, render scale, refresh rate and composition state
 
@@ -117,12 +119,12 @@ alongside Kestrel.
 Temperature is the one reading Windows does not hand out evenly, so it is worth
 knowing where each number comes from.
 
-**GPU (`GPT`)** needs nothing extra. Kestrel asks the display driver through the
+**GPU** needs nothing extra. Kestrel asks the display driver through the
 WDDM adapter interface, the same source Task Manager reads, so the value is the
 die temperature the card itself reports and it works on any vendor. Integrated
 graphics normally expose no sensor, and the row stays a dash.
 
-**CPU (`CPT`)** is the hard one. The digital thermal sensor on an Intel or AMD
+**CPU** is the hard one. The digital thermal sensor on an Intel or AMD
 package sits behind a model-specific register that only kernel-mode code can
 read. Every tool that shows a true core temperature ships a signed kernel driver
 to get at it. Kestrel does not ship one, for the same reason it does not inject
@@ -169,8 +171,14 @@ toggle is greyed out rather than displaying a number Kestrel cannot stand behind
 - Estimated time to empty and time to full
 - Charge cycle count and wear against the design capacity
 - Designed and full-charge capacity, chemistry, manufacturer
+- Pack temperature, where the firmware reports one
+- Manufacturer, model, serial and manufacture date, with the pack's age worked
+  out from it, so a wear figure has some context
 - **Charger deficit warning** — plugged in and still draining, because the load
   exceeds what the power supply delivers
+- A slow background log of charge, wear, cycles and temperature to
+  `battery-history.csv`, so ageing is visible over months rather than only
+  right now. Turn it off with `battery.history=false`
 
 ### Recording a run
 
@@ -402,6 +410,7 @@ Key modules:
 | `resource_usage_bi.*` | Shared PDH query for CPU, GPU, power and memory |
 | `gpu_sensor_bi.*` | GPU temperature via the WDDM adapter block, NVML fallback |
 | `mahm_sensor_bi.*` | Optional CPU package temperature from MSI Afterburner |
+| `battery_history_bi.*` | Slow background log of battery state to CSV |
 | `autostart_bi.*` | Registry and Task Scheduler autostart |
 | `settings_bi.*` | INI persistence |
 
@@ -416,8 +425,6 @@ Ordered roughly by priority. Suggestions are welcome, open an issue.
 - **Wider frame-source coverage.** Recognise more present events so that OpenGL
   and Vulkan titles work without manual configuration.
 - **Multi-GPU awareness.** Report each adapter separately instead of summing.
-- **Fan speed.** The WDDM adapter block already carries GPU fan RPM next to the
-  temperature Kestrel reads; surface it.
 - **Signed distribution.** Publish an Authenticode-signed binary whenever the
   project signing secrets are available.
 - **More translations.** The language-file mechanism is ready; additional

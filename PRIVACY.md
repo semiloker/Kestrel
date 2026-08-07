@@ -52,6 +52,13 @@ user profile at `%APPDATA%\Kestrel\`:
   CSV of frame times plus an `index.csv` summarising the runs. These files
   contain performance measurements and the name of the program you recorded.
   Nothing is uploaded; delete the folder at any time.
+- **`battery-history.csv`** — a row every few minutes while Kestrel runs,
+  recording charge level, remaining and full capacity, wear, cycle count,
+  temperature and charge/discharge watts, so you can see how the battery ages.
+  It describes the battery only, never what you were doing. It stops growing at
+  4 MB. Set `battery.history=false` in `settings.ini` to turn it off, or
+  `battery.historyMinutes` to change how often it writes; delete the file at
+  any time.
 
 All of these files stay on your computer. None is transmitted anywhere. You may
 delete any of them at any time; deleting `settings.ini` resets Kestrel to its

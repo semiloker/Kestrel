@@ -28,6 +28,9 @@ public:
     {
         double temperatureC = 0.0;
         double temperatureMaxC = 0.0;  // driver's shutdown limit, 0 when unknown
+        double fanRpm = 0.0;
+        double fanMaxRpm = 0.0;        // driver's stated maximum, 0 when unknown
+        bool fanValid = false;
         std::string adapterName;
         const char *source = "-";
     };
