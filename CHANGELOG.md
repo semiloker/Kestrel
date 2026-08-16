@@ -4,7 +4,7 @@ Notable changes per release. Dates are the release tag dates; before 1.5.0 the
 commit messages were the only release notes, so those entries are summaries
 rather than complete lists.
 
-## 1.5.0 - unreleased
+## 1.5.0 - 2026-08-16
 
 ### Added
 
