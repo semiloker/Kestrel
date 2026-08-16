@@ -10,6 +10,6 @@ Installers:
     InstallerUrl: https://github.com/semiloker/Kestrel/releases/download/v1.5.0/kestrel.exe
     # Fill in after the release asset is uploaded:
     #   sha256sum kestrel.exe   (or)   Get-FileHash kestrel.exe -Algorithm SHA256
-    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+    InstallerSha256: 73cefaf497e414457fe57a5e42d2c2885552075babd7ce044418acc2c3b137a1
 ManifestType: installer
 ManifestVersion: 1.6.0
