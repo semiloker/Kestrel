@@ -1,6 +1,7 @@
 #include "draw_batteryinfo_bi.h"
 #include "app_identity_bi.h"
 #include "paths_bi.h"
+#include "i18n_bi.h"
 
 #include <cmath>
 #include <cstdio>
@@ -63,24 +64,6 @@ namespace
         D2D1::ColorF(0xD9B585),
         D2D1::ColorF(0xBF99BF),
         D2D1::ColorF(0x8CBABD)};
-
-    const wchar_t *GROUP_NAMES[] = {
-        L"Overlay", L"Frame timing", L"GPU", L"CPU", L"Battery", L"Memory", L"Behavior"};
-
-    const wchar_t *GROUP_DESC[] = {
-        L"What the panel shows besides metrics.",
-        L"Frame rate and per-frame GPU time, from ETW.",
-        L"Adapter load and identity.",
-        L"Processor load, package power and identity.",
-        L"Battery readings mirrored into the overlay.",
-        L"Physical, commit and virtual memory.",
-        L"How Kestrel itself behaves."};
-
-    const wchar_t *CORNER_NAMES[] = {
-        L"Top left", L"Top right", L"Bottom left", L"Bottom right"};
-
-    const wchar_t *PRESET_NAMES[] = {L"Minimal", L"Gaming", L"Everything"};
-    const float PRESET_WIDTHS[] = {70.0f, 70.0f, 86.0f};
 
     std::wstring wfmt(const wchar_t *format, ...)
     {
@@ -320,22 +303,22 @@ void draw_batteryinfo_bi::setTheme(int index, bool resetAccent)
     }
 }
 
-const char *draw_batteryinfo_bi::themeName(int index)
+const wchar_t *draw_batteryinfo_bi::themeName(int index)
 {
     switch (index)
     {
-    case THEME_DARK:              return "Dark";
-    case THEME_LIGHT:             return "Light";
-    case THEME_NORD:              return "Nord";
-    case THEME_DRACULA:           return "Dracula";
-    case THEME_GRUVBOX:           return "Gruvbox";
-    case THEME_DEUTERANOPIA_DARK: return "Deuteranopia (Dark)";
-    case THEME_DEUTERANOPIA_LIGHT:return "Deuteranopia (Light)";
-    case THEME_PROTANOPIA_DARK:   return "Protanopia (Dark)";
-    case THEME_PROTANOPIA_LIGHT:  return "Protanopia (Light)";
-    case THEME_TRITANOPIA_DARK:   return "Tritanopia (Dark)";
-    case THEME_TRITANOPIA_LIGHT:  return "Tritanopia (Light)";
-    default:                      return "Dark";
+    case THEME_DARK:              return i18n_bi::tr("theme.dark", L"Dark");
+    case THEME_LIGHT:             return i18n_bi::tr("theme.light", L"Light");
+    case THEME_NORD:              return i18n_bi::tr("theme.nord", L"Nord");
+    case THEME_DRACULA:           return i18n_bi::tr("theme.dracula", L"Dracula");
+    case THEME_GRUVBOX:           return i18n_bi::tr("theme.gruvbox", L"Gruvbox");
+    case THEME_DEUTERANOPIA_DARK: return i18n_bi::tr("theme.deuteranopia_dark", L"Deuteranopia (Dark)");
+    case THEME_DEUTERANOPIA_LIGHT:return i18n_bi::tr("theme.deuteranopia_light", L"Deuteranopia (Light)");
+    case THEME_PROTANOPIA_DARK:   return i18n_bi::tr("theme.protanopia_dark", L"Protanopia (Dark)");
+    case THEME_PROTANOPIA_LIGHT:  return i18n_bi::tr("theme.protanopia_light", L"Protanopia (Light)");
+    case THEME_TRITANOPIA_DARK:   return i18n_bi::tr("theme.tritanopia_dark", L"Tritanopia (Dark)");
+    case THEME_TRITANOPIA_LIGHT:  return i18n_bi::tr("theme.tritanopia_light", L"Tritanopia (Light)");
+    default:                      return i18n_bi::tr("theme.dark", L"Dark");
     }
 }
 
@@ -974,8 +957,12 @@ void draw_batteryinfo_bi::drawTabBar(ID2D1HwndRenderTarget *pRT, init_dwrite_bi 
     logoMark(PAD, 15.0f, 26.0f);
     txt(dw->pTextFormatStrong, PAD + 34.0f, 19.0f, PAD + 110.0f, 37.0f, pal.text, L"Kestrel");
 
-    const wchar_t *labels[TAB_COUNT] = {L"Battery", L"Settings", L"Capture",
-                                        L"Appearance", L"About"};
+    const wchar_t *labels[TAB_COUNT] = {
+        i18n_bi::tr("tab.battery", L"Battery"),
+        i18n_bi::tr("tab.settings", L"Settings"),
+        i18n_bi::tr("tab.capture", L"Capture"),
+        i18n_bi::tr("tab.appearance", L"Appearance"),
+        i18n_bi::tr("tab.about", L"About")};
     const float widths[TAB_COUNT] = {48.0f, 53.0f, 52.0f, 74.0f, 40.0f};
 
     float x = 132.0f;
@@ -1019,9 +1006,10 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
         float top = TABBAR_H + PAD + shift;
         card(L, top, R, top + 96.0f);
         txt(dw->pTextFormatStrong, IX, top + 24.0f, IR, top + 44.0f, pal.text,
-            L"No battery detected");
+            i18n_bi::tr("batt.none", L"No battery detected"));
         txt(dw->pTextFormatLabel, IX, top + 50.0f, IR, top + 68.0f, pal.muted,
-            L"The battery device did not answer. Kestrel still reads CPU, GPU and memory.");
+            i18n_bi::tr("batt.none.desc",
+                L"The battery device did not answer. Kestrel still reads CPU, GPU and memory."));
         contentHeight = top + 96.0f + scrollOffsetY + PAD;
         clampScroll();
         return;
@@ -1031,12 +1019,14 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
     bool discharging = bi->info_1s.discharging;
 
     const D2D1_COLOR_F &stateColor = charging ? pal.ok : (discharging ? pal.warn : pal.muted);
-    std::wstring stateText = charging ? L"Charging" : (discharging ? L"Discharging" : L"Idle");
+    std::wstring stateText = charging ? i18n_bi::tr("batt.charging", L"Charging")
+                                      : (discharging ? i18n_bi::tr("batt.discharging", L"Discharging")
+                                                     : i18n_bi::tr("batt.idle", L"Idle"));
 
     float y = TABBAR_H + PAD + shift;
 
     card(L, y, R, y + 136.0f);
-    eyebrow(dw, IX, y + 16.0f, L"CHARGE");
+    eyebrow(dw, IX, y + 16.0f, i18n_bi::tr("batt.charge", L"CHARGE"));
 
     if (bi->info_1s.chargeValid)
     {
@@ -1081,14 +1071,16 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
     if (left >= 0)
     {
         txt(dw->pTextFormatLabel, IR - 220.0f, y + 109.0f, IR, y + 124.0f, pal.muted,
-            minutesText(left) + (discharging ? L" left" : L" to full"),
+            wfmt(discharging ? i18n_bi::trf("batt.time_left", L"%ls left")
+                             : i18n_bi::trf("batt.time_to_full", L"%ls to full"),
+                 minutesText(left).c_str()),
             DWRITE_TEXT_ALIGNMENT_TRAILING);
     }
 
     y += 136.0f + CARD_GAP;
 
     card(L, y, R, y + 108.0f);
-    eyebrow(dw, IX, y + 16.0f, L"HEALTH");
+    eyebrow(dw, IX, y + 16.0f, i18n_bi::tr("batt.health", L"HEALTH"));
 
     if (bi->info_static.wearValid)
     {
@@ -1101,33 +1093,34 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
         txt(dw->pTextFormatHeader, IX, y + 32.0f, IX + 70.0f, y + 56.0f, pal.text,
             wfmt(L"%.0f%%", health));
         txt(dw->pTextFormatSmall, IX + 52.0f, y + 37.0f, IX + 260.0f, y + 55.0f, pal.muted,
-            L"of design capacity");
+            i18n_bi::tr("batt.of_design", L"of design capacity"));
         txt(dw->pTextFormatLabel, IR - 160.0f, y + 37.0f, IR, y + 55.0f, wearColor,
-            wfmt(L"%.0f%% wear", bi->info_static.wearPercent), DWRITE_TEXT_ALIGNMENT_TRAILING);
+            wfmt(i18n_bi::trf("batt.wear", L"%.0f%% wear"), bi->info_static.wearPercent),
+            DWRITE_TEXT_ALIGNMENT_TRAILING);
 
         bar(IX, y + 67.0f, IW, 8.0f, (float)(health / 100.0), wearColor);
     }
     else
     {
         txt(dw->pTextFormatSmall, IX, y + 40.0f, IR, y + 58.0f, pal.faint,
-            L"This battery does not report a design capacity.");
+            i18n_bi::tr("batt.no_design", L"This battery does not report a design capacity."));
     }
 
     if (bi->info_static.cycleCountValid)
     {
         txt(dw->pTextFormatLabel, IX, y + 85.0f, IX + 200.0f, y + 100.0f, pal.muted,
-            wfmt(L"%d cycles", bi->info_static.cycleCount));
+            wfmt(i18n_bi::trf("batt.cycles", L"%d cycles"), bi->info_static.cycleCount));
     }
     else
     {
         txt(dw->pTextFormatLabel, IX, y + 85.0f, IX + 200.0f, y + 100.0f, pal.faint,
-            L"cycle count unavailable");
+            i18n_bi::tr("batt.cycles_unavailable", L"cycle count unavailable"));
     }
 
     if (bi->info_static.capacityValid)
     {
         txt(dw->pTextFormatLabel, IR - 280.0f, y + 85.0f, IR, y + 100.0f, pal.muted,
-            wfmt(L"%.1f Wh design \u00B7 %.1f Wh full",
+            wfmt(i18n_bi::trf("batt.design_full", L"%.1f Wh design \u00B7 %.1f Wh full"),
                  bi->info_static.designedWh, bi->info_static.fullChargedWh),
             DWRITE_TEXT_ALIGNMENT_TRAILING);
     }
@@ -1142,20 +1135,25 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
     };
 
     detail_cell details[7] = {
-        {L"CHEMISTRY", widen(bi->info_static.Chemistry), false},
-        {L"POWER STATE", bi->info_1s.onLine ? L"On mains" : L"On battery", false},
-        {L"VOLTAGE",
+        {i18n_bi::tr("batt.chemistry", L"CHEMISTRY"), widen(bi->info_static.Chemistry), false},
+        {i18n_bi::tr("batt.power_state", L"POWER STATE"),
+         bi->info_1s.onLine ? i18n_bi::tr("batt.on_mains", L"On mains")
+                            : i18n_bi::tr("batt.on_battery", L"On battery"),
+         false},
+        {i18n_bi::tr("batt.voltage", L"VOLTAGE"),
          bi->info_1s.voltageValid ? wfmt(L"%.2f V", bi->info_1s.voltageV) : L"\u2014",
          !bi->info_1s.voltageValid},
-        {L"POWER DRAW",
+        {i18n_bi::tr("batt.power_draw", L"POWER DRAW"),
          bi->info_1s.rateValid ? wfmt(L"%.2f W", bi->info_1s.rateW) : L"\u2014",
          !bi->info_1s.rateValid},
-        {L"TEMPERATURE",
+        {i18n_bi::tr("batt.temperature", L"TEMPERATURE"),
          bi->info_1s.tempValid ? wfmt(L"%.1f \u00B0C", bi->info_1s.tempC) : L"\u2014",
          !bi->info_1s.tempValid},
-        {L"TIME TO EMPTY", minutesText(bi->info_10s.minutesToEmpty),
+        {i18n_bi::tr("batt.time_to_empty", L"TIME TO EMPTY"),
+         minutesText(bi->info_10s.minutesToEmpty),
          bi->info_10s.minutesToEmpty < 0},
-        {L"TIME TO FULL", minutesText(bi->info_10s.minutesToFull),
+        {i18n_bi::tr("batt.time_to_full_label", L"TIME TO FULL"),
+         minutesText(bi->info_10s.minutesToFull),
          bi->info_10s.minutesToFull < 0}};
 
     const int detailCount = (int)(sizeof(details) / sizeof(details[0]));
@@ -1167,7 +1165,7 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
     float detailH = 41.0f + (float)detailRows * 48.0f + 14.0f;
 
     card(L, y, R, y + detailH);
-    eyebrow(dw, IX, y + 16.0f, L"DETAILS");
+    eyebrow(dw, IX, y + 16.0f, i18n_bi::tr("batt.details", L"DETAILS"));
 
     for (int i = 0; i < detailCount; ++i)
     {
@@ -1180,23 +1178,24 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
     y += detailH + CARD_GAP;
 
     card(L, y, R, y + 124.0f);
-    eyebrow(dw, IX, y + 16.0f, L"ALERTS");
+    eyebrow(dw, IX, y + 16.0f, i18n_bi::tr("batt.alerts", L"ALERTS"));
 
     bool alerts = bi->info_static.alertsValid;
 
-    txt(dw->pTextFormatValue, IX, y + 41.0f, IX + 240.0f, y + 61.0f, pal.text, L"Low battery");
+    txt(dw->pTextFormatValue, IX, y + 41.0f, IX + 240.0f, y + 61.0f, pal.text,
+        i18n_bi::tr("batt.low", L"Low battery"));
     txt(dw->pTextFormatSmall, IR - 160.0f, y + 41.0f, IR, y + 61.0f,
         alerts ? pal.muted : pal.faint,
-        alerts ? wfmt(L"%.1f Wh", bi->info_static.alert1Wh) : L"Not set",
+        alerts ? wfmt(L"%.1f Wh", bi->info_static.alert1Wh) : i18n_bi::tr("batt.not_set", L"Not set"),
         DWRITE_TEXT_ALIGNMENT_TRAILING);
 
     line(IX, y + 72.0f, IR, y + 72.0f, pal.border, 1.0f);
 
     txt(dw->pTextFormatValue, IX, y + 83.0f, IX + 240.0f, y + 103.0f, pal.text,
-        L"Critical battery");
+        i18n_bi::tr("batt.critical", L"Critical battery"));
     txt(dw->pTextFormatSmall, IR - 160.0f, y + 83.0f, IR, y + 103.0f,
         alerts ? pal.muted : pal.faint,
-        alerts ? wfmt(L"%.1f Wh", bi->info_static.alert2Wh) : L"Not set",
+        alerts ? wfmt(L"%.1f Wh", bi->info_static.alert2Wh) : i18n_bi::tr("batt.not_set", L"Not set"),
         DWRITE_TEXT_ALIGNMENT_TRAILING);
 
     y += 124.0f + CARD_GAP;
@@ -1204,19 +1203,19 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
     // Firmware identity. Age is the one number here that earns its place: it is
     // what makes a wear percentage mean something.
     detail_cell identity[5] = {
-        {L"MANUFACTURER",
+        {i18n_bi::tr("batt.manufacturer", L"MANUFACTURER"),
          bi->info_static.manufacturerValid ? widen(bi->info_static.Manufacturer) : L"\u2014",
          !bi->info_static.manufacturerValid},
-        {L"MODEL",
+        {i18n_bi::tr("batt.model", L"MODEL"),
          bi->info_static.deviceNameValid ? widen(bi->info_static.DeviceName) : L"\u2014",
          !bi->info_static.deviceNameValid},
-        {L"SERIAL",
+        {i18n_bi::tr("batt.serial", L"SERIAL"),
          bi->info_static.serialValid ? widen(bi->info_static.SerialNumber) : L"\u2014",
          !bi->info_static.serialValid},
-        {L"MANUFACTURED",
+        {i18n_bi::tr("batt.manufactured", L"MANUFACTURED"),
          bi->info_static.manufactureDateValid ? widen(bi->info_static.ManufactureDate) : L"\u2014",
          !bi->info_static.manufactureDateValid},
-        {L"AGE",
+        {i18n_bi::tr("batt.age", L"AGE"),
          bi->info_static.manufactureDateValid ? widen(bi->info_static.Age) : L"\u2014",
          !bi->info_static.manufactureDateValid}};
 
@@ -1227,7 +1226,7 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
     float identityH = 41.0f + (float)idRows * 48.0f + 14.0f;
 
     card(L, y, R, y + identityH);
-    eyebrow(dw, IX, y + 16.0f, L"BATTERY");
+    eyebrow(dw, IX, y + 16.0f, i18n_bi::tr("batt.battery", L"BATTERY"));
 
     for (int i = 0; i < identityCount; ++i)
     {
@@ -1242,7 +1241,8 @@ void draw_batteryinfo_bi::drawBatteryTab(ID2D1HwndRenderTarget *pRT, init_dwrite
     contentHeight = y + scrollOffsetY + FOOTER_H;
     clampScroll();
 
-    drawFooter(dw, L"Windows owns these thresholds. Kestrel only reads them.");
+    drawFooter(dw, i18n_bi::tr("batt.footer",
+        L"Windows owns these thresholds. Kestrel only reads them."));
     drawScrollbar();
 }
 
@@ -1261,175 +1261,241 @@ int draw_batteryinfo_bi::buildGroupRows(int group, overlay_bi *ov, resource_usag
     switch (group)
     {
     case GROUP_OVERLAY:
-        r = {L"Display info row", &ov->hud.showDisplay, nullptr, MC_NONE, true,
-             L"Monitor, resolution and refresh at the top"};
+        r = {i18n_bi::tr("metric.display_info", L"Display info row"),
+             &ov->hud.showDisplay, nullptr, MC_NONE, true,
+             i18n_bi::tr("metric.display_info.desc",
+                 L"Monitor, resolution and refresh at the top")};
         out.push_back(r);
-        r = {L"Frame time percentiles", &ov->hud.showLows, nullptr, MC_NONE, frameOk,
-             L"Worst-case 1% and 0.1% low FPS (LOW:)"};
+        r = {i18n_bi::tr("metric.frame_percentiles", L"Frame time percentiles"),
+             &ov->hud.showLows, nullptr, MC_NONE, frameOk,
+             i18n_bi::tr("metric.frame_percentiles.desc",
+                 L"Worst-case 1% and 0.1% low FPS (LOW:)")};
         out.push_back(r);
-        r = {L"Network speeds", &ov->hud.showNetwork, nullptr, MC_NONE, true,
-             L"Download and upload speeds (DW:/UP:)"};
+        r = {i18n_bi::tr("metric.network", L"Network speeds"),
+             &ov->hud.showNetwork, nullptr, MC_NONE, true,
+             i18n_bi::tr("metric.network.desc", L"Download and upload speeds (DW:/UP:)")};
         out.push_back(r);
-        r = {L"Disk usage", &ov->hud.showDisk, nullptr, MC_NONE, true,
-             L"Disk space used on the system drive (DSK:)"};
+        r = {i18n_bi::tr("metric.disk", L"Disk usage"),
+             &ov->hud.showDisk, nullptr, MC_NONE, true,
+             i18n_bi::tr("metric.disk.desc", L"Disk space used on the system drive (DSK:)")};
         out.push_back(r);
         break;
 
     case GROUP_FRAME:
-        r = {L"Frame rate", &ov->hud.metrics[HUD_M_FPS].show,
+        r = {i18n_bi::tr("metric.frame_rate", L"Frame rate"),
+             &ov->hud.metrics[HUD_M_FPS].show,
              &ov->hud.metrics[HUD_M_FPS].graphed, MC_CPU, frameOk,
-             L"Frames per second (FPS:), on its own scale", HUD_M_FPS};
+             i18n_bi::tr("metric.frame_rate.desc",
+                 L"Frames per second (FPS:), on its own scale"), HUD_M_FPS};
         out.push_back(r);
-        r = {L"Frame interval", &ov->hud.metrics[HUD_M_PRE].show,
+        r = {i18n_bi::tr("metric.frame_interval", L"Frame interval"),
+             &ov->hud.metrics[HUD_M_PRE].show,
              &ov->hud.metrics[HUD_M_PRE].graphed, MC_CPU, frameOk,
-             L"Milliseconds between frames (PRE:)", HUD_M_PRE};
+             i18n_bi::tr("metric.frame_interval.desc", L"Milliseconds between frames (PRE:)"),
+             HUD_M_PRE};
         out.push_back(r);
-        r = {L"GPU milliseconds", &ov->hud.metrics[HUD_M_GPUMS].show,
+        r = {i18n_bi::tr("metric.gpu_ms", L"GPU milliseconds"),
+             &ov->hud.metrics[HUD_M_GPUMS].show,
              &ov->hud.metrics[HUD_M_GPUMS].graphed, MC_GPUMS, frameOk,
-             L"GPU render time per frame (GPU: ms)", HUD_M_GPUMS};
+             i18n_bi::tr("metric.gpu_ms.desc", L"GPU render time per frame (GPU: ms)"),
+             HUD_M_GPUMS};
         out.push_back(r);
-        r = {L"CPU or GPU bound", &ov->hud.showBottleneck, nullptr, MC_NONE, frameOk,
-             L"Which one is capping the frame rate (BND:)"};
+        r = {i18n_bi::tr("metric.bottleneck", L"CPU or GPU bound"),
+             &ov->hud.showBottleneck, nullptr, MC_NONE, frameOk,
+             i18n_bi::tr("metric.bottleneck.desc",
+                 L"Which one is capping the frame rate (BND:)")};
         out.push_back(r);
         break;
 
     case GROUP_GPU:
-        r = {L"Load", &ru->gpuInfo.show_gpuLoad, &ov->hud.metrics[HUD_M_GPU].graphed, MC_GPU, true,
-             L"GPU busy percentage (GPU: %)", HUD_M_GPU};
+        r = {i18n_bi::tr("metric.gpu_load", L"Load"),
+             &ru->gpuInfo.show_gpuLoad, &ov->hud.metrics[HUD_M_GPU].graphed, MC_GPU, true,
+             i18n_bi::tr("metric.gpu_load.desc", L"GPU busy percentage (GPU: %)"), HUD_M_GPU};
         out.push_back(r);
-        r = {L"Video memory", &ru->gpuInfo.show_vram, nullptr, MC_GPU,
-             ru->gpuInfo.vramTotalMB > 0.0, L"VRAM used and total (VRM:)"};
+        r = {i18n_bi::tr("metric.vram", L"Video memory"), &ru->gpuInfo.show_vram, nullptr, MC_GPU,
+             ru->gpuInfo.vramTotalMB > 0.0,
+             i18n_bi::tr("metric.vram.desc", L"VRAM used and total (VRM:)")};
         out.push_back(r);
-        r = {L"Temperature", &ru->gpuInfo.show_gpuTemp,
+        r = {i18n_bi::tr("metric.gpu_temp", L"Temperature"), &ru->gpuInfo.show_gpuTemp,
              &ov->hud.metrics[HUD_M_GPUTEMP].graphed, MC_GPUMS,
              ru->gpuInfo.gpuTempAvailable,
-             L"GPU die temperature from the display driver (GPU: C)", HUD_M_GPUTEMP};
+             i18n_bi::tr("metric.gpu_temp.desc",
+                 L"GPU die temperature from the display driver (GPU: C)"), HUD_M_GPUTEMP};
         out.push_back(r);
-        r = {L"Power draw", &ru->gpuInfo.show_gpuPower,
+        r = {i18n_bi::tr("metric.gpu_power", L"Power draw"), &ru->gpuInfo.show_gpuPower,
              &ov->hud.metrics[HUD_M_GPUW].graphed, MC_POWER, ru->gpuInfo.gpuPowerAvailable,
-             L"GPU watts from the Energy Meter (GPU: W)", HUD_M_GPUW};
+             i18n_bi::tr("metric.gpu_power.desc",
+                 L"GPU watts from the Energy Meter (GPU: W)"), HUD_M_GPUW};
         out.push_back(r);
-        r = {L"Fan speed", &ru->gpuInfo.show_gpuFan,
+        r = {i18n_bi::tr("metric.gpu_fan", L"Fan speed"), &ru->gpuInfo.show_gpuFan,
              nullptr, MC_NONE, ru->gpuInfo.gpuFanAvailable,
-             L"Graphics card fan speed (GPU: RPM)", HUD_M_GPUFAN};
+             i18n_bi::tr("metric.gpu_fan.desc", L"Graphics card fan speed (GPU: RPM)"),
+             HUD_M_GPUFAN};
         out.push_back(r);
-        r = {L"Adapter name", &ru->gpuInfo.show_gpuName, nullptr, MC_NONE, true,
-             L"Graphics card model"};
+        r = {i18n_bi::tr("metric.adapter_name", L"Adapter name"),
+             &ru->gpuInfo.show_gpuName, nullptr, MC_NONE, true,
+             i18n_bi::tr("metric.adapter_name.desc", L"Graphics card model")};
         out.push_back(r);
-        r = {L"Per-adapter VRAM", &ru->gpuInfo.show_adapters, nullptr, MC_NONE,
-             ru->adapters.size() > 1, L"Show VRAM for each adapter separately"};
+        r = {i18n_bi::tr("metric.per_adapter_vram", L"Per-adapter VRAM"),
+             &ru->gpuInfo.show_adapters, nullptr, MC_NONE,
+             ru->adapters.size() > 1,
+             i18n_bi::tr("metric.per_adapter_vram.desc",
+                 L"Show VRAM for each adapter separately")};
         out.push_back(r);
         break;
 
     case GROUP_CPU:
-        r = {L"Load", &ru->cpuInfo.show_UsagePercent, &ov->hud.metrics[HUD_M_CPU].graphed,
-             MC_CPU, true, L"Total CPU utilisation (CPU: %)", HUD_M_CPU};
+        r = {i18n_bi::tr("metric.cpu_load", L"Load"),
+             &ru->cpuInfo.show_UsagePercent, &ov->hud.metrics[HUD_M_CPU].graphed,
+             MC_CPU, true, i18n_bi::tr("metric.cpu_load.desc",
+                 L"Total CPU utilisation (CPU: %)"), HUD_M_CPU};
         out.push_back(r);
-        r = {L"Temperature", &ru->cpuInfo.show_cpuTemp,
+        r = {i18n_bi::tr("metric.cpu_temp", L"Temperature"), &ru->cpuInfo.show_cpuTemp,
              &ov->hud.metrics[HUD_M_CPUTEMP].graphed, MC_POWER,
              ru->cpuInfo.cpuTempAvailable,
              ru->cpuInfo.cpuTempApproximate
-                 ? L"ACPI zone (CPU: C) - approximate, run Afterburner for the die"
-                 : L"CPU die temperature via MSI Afterburner (CPU: C)",
+                 ? i18n_bi::tr("metric.cpu_temp.approx.desc",
+                     L"ACPI zone (CPU: C) - approximate, run Afterburner for the die")
+                 : i18n_bi::tr("metric.cpu_temp.desc",
+                     L"CPU die temperature via MSI Afterburner (CPU: C)"),
              HUD_M_CPUTEMP};
         out.push_back(r);
-        r = {L"Package power", &ru->cpuInfo.show_packagePower,
+        r = {i18n_bi::tr("metric.package_power", L"Package power"),
+             &ru->cpuInfo.show_packagePower,
              &ov->hud.metrics[HUD_M_CPUW].graphed, MC_POWER, powerOk,
-             L"CPU package watts (CPU: W)", HUD_M_CPUW};
+             i18n_bi::tr("metric.package_power.desc", L"CPU package watts (CPU: W)"),
+             HUD_M_CPUW};
         out.push_back(r);
-        r = {L"Frames per watt", &ov->hud.showEfficiency, nullptr, MC_POWER,
-             frameOk && powerOk, L"FPS delivered per CPU watt (EFF:)"};
+        r = {i18n_bi::tr("metric.frames_per_watt", L"Frames per watt"),
+             &ov->hud.showEfficiency, nullptr, MC_POWER,
+             frameOk && powerOk,
+             i18n_bi::tr("metric.frames_per_watt.desc", L"FPS delivered per CPU watt (EFF:)")};
         out.push_back(r);
-        r = {L"Per-core load", &ru->cpuInfo.show_CoreUsagePercents, nullptr, MC_NONE, true,
-             L"Utilisation of each logical core"};
+        r = {i18n_bi::tr("metric.per_core", L"Per-core load"),
+             &ru->cpuInfo.show_CoreUsagePercents, nullptr, MC_NONE, true,
+             i18n_bi::tr("metric.per_core.desc", L"Utilisation of each logical core")};
         out.push_back(r);
-        r = {L"Processor name", &ru->cpuInfo.show_cpuName, nullptr, MC_NONE, true,
-             L"CPU model, shown above the adapter"};
+        r = {i18n_bi::tr("metric.processor_name", L"Processor name"),
+             &ru->cpuInfo.show_cpuName, nullptr, MC_NONE, true,
+             i18n_bi::tr("metric.processor_name.desc", L"CPU model, shown above the adapter")};
         out.push_back(r);
-        r = {L"Architecture", &ru->cpuInfo.show_architecture, nullptr, MC_NONE, true,
-             L"Instruction set, e.g. x64 (ARCH:)"};
+        r = {i18n_bi::tr("metric.architecture", L"Architecture"),
+             &ru->cpuInfo.show_architecture, nullptr, MC_NONE, true,
+             i18n_bi::tr("metric.architecture.desc", L"Instruction set, e.g. x64 (ARCH:)")};
         out.push_back(r);
         break;
 
     case GROUP_BATTERY:
-        r = {L"Voltage", &bi->info_1s.Voltage_, nullptr, MC_NONE, bi->present,
-             L"Battery terminal voltage"};
+        r = {i18n_bi::tr("metric.batt_voltage", L"Voltage"),
+             &bi->info_1s.Voltage_, nullptr, MC_NONE, bi->present,
+             i18n_bi::tr("metric.batt_voltage.desc", L"Battery terminal voltage")};
         out.push_back(r);
-        r = {L"Power draw", &bi->info_1s.Rate_, nullptr, MC_NONE, bi->present,
-             L"Charge or discharge watts"};
+        r = {i18n_bi::tr("metric.batt_power", L"Power draw"),
+             &bi->info_1s.Rate_, nullptr, MC_NONE, bi->present,
+             i18n_bi::tr("metric.batt_power.desc", L"Charge or discharge watts")};
         out.push_back(r);
-        r = {L"Power state", &bi->info_1s.PowerState_, nullptr, MC_NONE, bi->present,
-             L"Charging, discharging or idle"};
+        r = {i18n_bi::tr("metric.batt_state", L"Power state"),
+             &bi->info_1s.PowerState_, nullptr, MC_NONE, bi->present,
+             i18n_bi::tr("metric.batt_state.desc", L"Charging, discharging or idle")};
         out.push_back(r);
-        r = {L"Remaining capacity", &bi->info_1s.RemainingCapacity_, nullptr, MC_NONE, bi->present,
-             L"Energy left in watt-hours"};
+        r = {i18n_bi::tr("metric.batt_remaining", L"Remaining capacity"),
+             &bi->info_1s.RemainingCapacity_, nullptr, MC_NONE, bi->present,
+             i18n_bi::tr("metric.batt_remaining.desc", L"Energy left in watt-hours")};
         out.push_back(r);
-        r = {L"Charge level", &bi->info_1s.ChargeLevel_, nullptr, MC_NONE, bi->present,
-             L"Battery percentage"};
+        r = {i18n_bi::tr("metric.batt_charge", L"Charge level"),
+             &bi->info_1s.ChargeLevel_, nullptr, MC_NONE, bi->present,
+             i18n_bi::tr("metric.batt_charge.desc", L"Battery percentage")};
         out.push_back(r);
-        r = {L"Time remaining", &bi->info_10s.TimeRemaining_, nullptr, MC_NONE, bi->present,
-             L"Estimated time to empty or full"};
+        r = {i18n_bi::tr("metric.batt_time", L"Time remaining"),
+             &bi->info_10s.TimeRemaining_, nullptr, MC_NONE, bi->present,
+             i18n_bi::tr("metric.batt_time.desc", L"Estimated time to empty or full")};
         out.push_back(r);
-        r = {L"Charger deficit warning", &ov->hud.showChargerDeficit, nullptr, MC_NONE,
-             bi->present, L"Warns when the charger cannot keep up (CHG:)"};
+        r = {i18n_bi::tr("metric.charger_deficit", L"Charger deficit warning"),
+             &ov->hud.showChargerDeficit, nullptr, MC_NONE,
+             bi->present, i18n_bi::tr("metric.charger_deficit.desc",
+                 L"Warns when the charger cannot keep up (CHG:)")};
         out.push_back(r);
-        r = {L"Power flow graph", &ov->hud.metrics[HUD_M_BATTERYD].show,
+        r = {i18n_bi::tr("metric.batt_flow", L"Power flow graph"),
+             &ov->hud.metrics[HUD_M_BATTERYD].show,
              &ov->hud.metrics[HUD_M_BATTERYD].graphed, MC_POWER, bi->present,
-             L"Battery charge/discharge watts (BAT:)", HUD_M_BATTERYD};
+             i18n_bi::tr("metric.batt_flow.desc", L"Battery charge/discharge watts (BAT:)"),
+             HUD_M_BATTERYD};
         out.push_back(r);
-        r = {L"Temperature", &ov->hud.metrics[HUD_M_BATTEMP].show,
+        r = {i18n_bi::tr("metric.batt_temp", L"Temperature"),
+             &ov->hud.metrics[HUD_M_BATTEMP].show,
              &ov->hud.metrics[HUD_M_BATTEMP].graphed, MC_POWER,
              bi->present && bi->info_1s.tempValid,
-             L"Battery pack temperature (BAT: C)", HUD_M_BATTEMP};
+             i18n_bi::tr("metric.batt_temp.desc", L"Battery pack temperature (BAT: C)"),
+             HUD_M_BATTEMP};
         out.push_back(r);
         break;
 
     case GROUP_MEMORY:
-        r = {L"Load", &ru->ramInfo.show_dwMemoryLoad, &ov->hud.metrics[HUD_M_RAM].graphed,
-             MC_RAM, true, L"Physical RAM in use (RAM: %)", HUD_M_RAM};
+        r = {i18n_bi::tr("metric.mem_load", L"Load"),
+             &ru->ramInfo.show_dwMemoryLoad, &ov->hud.metrics[HUD_M_RAM].graphed,
+             MC_RAM, true, i18n_bi::tr("metric.mem_load.desc",
+                 L"Physical RAM in use (RAM: %)"), HUD_M_RAM};
         out.push_back(r);
-        r = {L"Commit charge", &ru->ramInfo.show_ullTotalPageFile,
+        r = {i18n_bi::tr("metric.commit", L"Commit charge"),
+             &ru->ramInfo.show_ullTotalPageFile,
              &ov->hud.metrics[HUD_M_COMMIT].graphed, MC_COMMIT, true,
-             L"Committed memory against the limit (CMT:)", HUD_M_COMMIT};
+             i18n_bi::tr("metric.commit.desc",
+                 L"Committed memory against the limit (CMT:)"), HUD_M_COMMIT};
         out.push_back(r);
-        r = {L"Total physical", &ru->ramInfo.show_ullTotalPhys, nullptr, MC_NONE, true,
-             L"Installed RAM"};
+        r = {i18n_bi::tr("metric.mem_total", L"Total physical"),
+             &ru->ramInfo.show_ullTotalPhys, nullptr, MC_NONE, true,
+             i18n_bi::tr("metric.mem_total.desc", L"Installed RAM")};
         out.push_back(r);
-        r = {L"Available physical", &ru->ramInfo.show_ullAvailPhys, nullptr, MC_NONE, true,
-             L"Free RAM"};
+        r = {i18n_bi::tr("metric.mem_avail", L"Available physical"),
+             &ru->ramInfo.show_ullAvailPhys, nullptr, MC_NONE, true,
+             i18n_bi::tr("metric.mem_avail.desc", L"Free RAM")};
         out.push_back(r);
-        r = {L"Available page file", &ru->ramInfo.show_ullAvailPageFile, nullptr, MC_NONE, true,
-             L"Free page-file space"};
+        r = {i18n_bi::tr("metric.mem_page", L"Available page file"),
+             &ru->ramInfo.show_ullAvailPageFile, nullptr, MC_NONE, true,
+             i18n_bi::tr("metric.mem_page.desc", L"Free page-file space")};
         out.push_back(r);
-        r = {L"Total virtual", &ru->ramInfo.show_ullTotalVirtual, nullptr, MC_NONE, true,
-             L"Size of the address space"};
+        r = {i18n_bi::tr("metric.virtual_total", L"Total virtual"),
+             &ru->ramInfo.show_ullTotalVirtual, nullptr, MC_NONE, true,
+             i18n_bi::tr("metric.virtual_total.desc", L"Size of the address space")};
         out.push_back(r);
-        r = {L"Available virtual", &ru->ramInfo.show_ullAvailVirtual, nullptr, MC_NONE, true,
-             L"Free address space"};
+        r = {i18n_bi::tr("metric.virtual_avail", L"Available virtual"),
+             &ru->ramInfo.show_ullAvailVirtual, nullptr, MC_NONE, true,
+             i18n_bi::tr("metric.virtual_avail.desc", L"Free address space")};
         out.push_back(r);
-        r = {L"Extended virtual", &ru->ramInfo.show_ullAvailExtendedVirtual, nullptr,
-             MC_NONE, true, L"Free extended address space"};
+        r = {i18n_bi::tr("metric.virtual_ext", L"Extended virtual"),
+             &ru->ramInfo.show_ullAvailExtendedVirtual, nullptr,
+             MC_NONE, true,
+             i18n_bi::tr("metric.virtual_ext.desc", L"Free extended address space")};
         out.push_back(r);
         break;
 
     case GROUP_BEHAVIOR:
-        r = {L"Start with Windows", &ru->start_With_Windows, nullptr, MC_NONE, true,
-             L"Launch at sign-in, into the tray if 'Minimize to tray' is on"};
+        r = {i18n_bi::tr("behavior.start", L"Start with Windows"),
+             &ru->start_With_Windows, nullptr, MC_NONE, true,
+             i18n_bi::tr("behavior.start.desc",
+                 L"Launch at sign-in, into the tray if 'Minimize to tray' is on")};
         out.push_back(r);
-        r = {L"Run as administrator", &ru->start_As_Admin, nullptr, MC_NONE, true,
-             L"Needed for frame timing (ETW)"};
+        r = {i18n_bi::tr("behavior.admin", L"Run as administrator"),
+             &ru->start_As_Admin, nullptr, MC_NONE, true,
+             i18n_bi::tr("behavior.admin.desc", L"Needed for frame timing (ETW)")};
         out.push_back(r);
-        r = {L"Minimize to tray", &ru->minimize_To_Tray, nullptr, MC_NONE, true,
-             L"Hide to the tray instead of the taskbar"};
+        r = {i18n_bi::tr("behavior.tray", L"Minimize to tray"),
+             &ru->minimize_To_Tray, nullptr, MC_NONE, true,
+             i18n_bi::tr("behavior.tray.desc", L"Hide to the tray instead of the taskbar")};
         out.push_back(r);
-        r = {L"Exit on ESC", &ru->exit_on_key_esc, nullptr, MC_NONE, true,
-             L"Close the window when you press Escape"};
+        r = {i18n_bi::tr("behavior.esc", L"Exit on ESC"),
+             &ru->exit_on_key_esc, nullptr, MC_NONE, true,
+             i18n_bi::tr("behavior.esc.desc", L"Close the window when you press Escape")};
         out.push_back(r);
-        r = {L"Auto-hide overlay", &ov->autoHideOverlay, nullptr, MC_NONE, true,
-             L"Only show the overlay while a game or fullscreen app is running"};
+        r = {i18n_bi::tr("behavior.autohide", L"Auto-hide overlay"),
+             &ov->autoHideOverlay, nullptr, MC_NONE, true,
+             i18n_bi::tr("behavior.autohide.desc",
+                 L"Only show the overlay while a game or fullscreen app is running")};
         out.push_back(r);
-        r = {L"Click-through overlay", &ov->clickable, nullptr, MC_NONE, true,
-             L"Let mouse clicks pass through the overlay (toggle off to interact)"};
+        r = {i18n_bi::tr("behavior.clickthrough", L"Click-through overlay"),
+             &ov->clickable, nullptr, MC_NONE, true,
+             i18n_bi::tr("behavior.clickthrough.desc",
+                 L"Let mouse clicks pass through the overlay (toggle off to interact)")};
         out.push_back(r);
         break;
     }
@@ -1756,7 +1822,7 @@ void draw_batteryinfo_bi::drawOverlayPreview(init_dwrite_bi *dw, overlay_bi *ov,
     {
         fillRR(l, t, l + 200.0f, t + 40.0f, lay.cornerRadius, th.panel);
         txt(dw->pTextFormatLabel, l + 12.0f, t, l + 200.0f, t + 40.0f,
-            D2D1::ColorF(0x8C8C8C), L"Nothing enabled");
+            D2D1::ColorF(0x8C8C8C), i18n_bi::tr("preview.nothing", L"Nothing enabled"));
         return;
     }
 
@@ -1892,6 +1958,30 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
 {
     beginFrame(pRT);
 
+    static const wchar_t *GROUP_NAMES[] = {
+        i18n_bi::tr("group.overlay", L"Overlay"),
+        i18n_bi::tr("group.frame", L"Frame timing"),
+        i18n_bi::tr("group.gpu", L"GPU"),
+        i18n_bi::tr("group.cpu", L"CPU"),
+        i18n_bi::tr("group.battery", L"Battery"),
+        i18n_bi::tr("group.memory", L"Memory"),
+        i18n_bi::tr("group.behavior", L"Behavior")};
+
+    static const wchar_t *GROUP_DESC[] = {
+        i18n_bi::tr("group.overlay.desc", L"What the panel shows besides metrics."),
+        i18n_bi::tr("group.frame.desc", L"Frame rate and per-frame GPU time, from ETW."),
+        i18n_bi::tr("group.gpu.desc", L"Adapter load and identity."),
+        i18n_bi::tr("group.cpu.desc", L"Processor load, package power and identity."),
+        i18n_bi::tr("group.battery.desc", L"Battery readings mirrored into the overlay."),
+        i18n_bi::tr("group.memory.desc", L"Physical, commit and virtual memory."),
+        i18n_bi::tr("group.behavior.desc", L"How Kestrel itself behaves.")};
+
+    static const wchar_t *PRESET_NAMES[] = {
+        i18n_bi::tr("preset.minimal", L"Minimal"),
+        i18n_bi::tr("preset.gaming", L"Gaming"),
+        i18n_bi::tr("preset.everything", L"Everything")};
+    static const float PRESET_WIDTHS[] = {70.0f, 70.0f, 86.0f};
+
     float L = contentLeft();
     float R = contentRight();
     float shift = -scrollOffsetY;
@@ -1907,9 +1997,9 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
         hoverFill(L + 1.0f, y + 1.0f, R - 1.0f, y + 61.0f, CARD_R);
 
     txt(dw->pTextFormatStrong, L + CARD_PAD, y + 11.0f, L + 320.0f, y + 31.0f, pal.text,
-        L"Show overlay");
+        i18n_bi::tr("settings.show_overlay", L"Show overlay"));
     txt(dw->pTextFormatLabel, L + CARD_PAD, y + 33.0f, L + 360.0f, y + 49.0f, pal.faint,
-        L"The panel drawn on top of games");
+        i18n_bi::tr("settings.show_overlay.desc", L"The panel drawn on top of games"));
 
     float toggleX = R - CARD_PAD - TOGGLE_W;
     toggle(toggleX, y + 19.0f, overlayOn, false);
@@ -1918,7 +2008,8 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
 
     y += 62.0f + CARD_GAP;
 
-    txt(dw->pTextFormatLabel, L, y, L + 50.0f, y + 28.0f, pal.faint, L"Preset");
+    txt(dw->pTextFormatLabel, L, y, L + 50.0f, y + 28.0f, pal.faint,
+        i18n_bi::tr("settings.preset", L"Preset"));
 
     if (settingsDirty)
     {
@@ -1979,11 +2070,13 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
     }
 
     txt(dw->pTextFormatMicro, R - 200.0f, y, R, y + 28.0f, pal.faint,
-        wfmt(L"%d of %d shown", totalOn, totalRows), DWRITE_TEXT_ALIGNMENT_TRAILING);
+        wfmt(i18n_bi::trf("settings.shown", L"%d of %d shown"), totalOn, totalRows),
+        DWRITE_TEXT_ALIGNMENT_TRAILING);
 
     y += 28.0f + CARD_GAP;
 
-    txt(dw->pTextFormatLabel, L, y, L + 82.0f, y + 28.0f, pal.faint, L"My presets");
+    txt(dw->pTextFormatLabel, L, y, L + 82.0f, y + 28.0f, pal.faint,
+        i18n_bi::tr("settings.my_presets", L"My presets"));
 
     std::string curLayout = captureLayout(ov, ru, bi);
 
@@ -2035,7 +2128,8 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
 
     if (R - upx > 210.0f)
         txt(dw->pTextFormatMicro, upx + 6.0f, y, R, y + 28.0f, pal.faint,
-            L"number applies \u00B7 arrow saves current setup");
+            i18n_bi::tr("settings.preset_hint",
+                L"number applies \u00B7 arrow saves current setup"));
 
     y += 28.0f + CARD_GAP;
 
@@ -2063,7 +2157,7 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
         if (g == GROUP_FRAME && !frameOk)
         {
             txt(dw->pTextFormatMicro, L + 14.0f, ry, L + RAIL_W - 12.0f, ry + RAIL_ITEM_H,
-                pal.warn, L"admin", DWRITE_TEXT_ALIGNMENT_TRAILING);
+                pal.warn, i18n_bi::tr("settings.admin", L"admin"), DWRITE_TEXT_ALIGNMENT_TRAILING);
         }
         else
         {
@@ -2104,13 +2198,15 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
         strokeRR(PX, paneY, paneRight, paneY + bannerH, 8.0f, pal.warn, 1.0f);
 
         txt(dw->pTextFormatSmall, PX + 14.0f, paneY + 10.0f, paneRight - 14.0f, paneY + 28.0f,
-            pal.warn, L"Frame timing needs administrator rights");
+            pal.warn, i18n_bi::tr("settings.frame_admin", L"Frame timing needs administrator rights"));
         txt(dw->pTextFormatLabel, PX + 14.0f, paneY + 30.0f, paneRight - 14.0f, paneY + 46.0f,
-            pal.muted, L"ETW session creation is refused for standard users.");
+            pal.muted, i18n_bi::tr("settings.frame_admin.desc",
+                L"ETW session creation is refused for standard users."));
 
         fillRR(PX + 14.0f, paneY + 50.0f, PX + 146.0f, paneY + 66.0f + 14.0f, BTN_R, pal.warn);
         txt(dw->pTextFormatLabel, PX + 14.0f, paneY + 50.0f, PX + 146.0f, paneY + 80.0f,
-            D2D1::ColorF(0x1A1A1A), L"Restart as admin", DWRITE_TEXT_ALIGNMENT_CENTER);
+            D2D1::ColorF(0x1A1A1A), i18n_bi::tr("settings.restart_admin", L"Restart as admin"),
+            DWRITE_TEXT_ALIGNMENT_CENTER);
 
         if (isHovered(HIT_ACTION, ACT_RESTART_ADMIN))
             hoverRing(PX + 14.0f, paneY + 50.0f, PX + 146.0f, paneY + 80.0f, BTN_R);
@@ -2126,9 +2222,11 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
         fillRR(PX, paneY, paneRight, paneY + bannerH, 8.0f, pal.inset);
 
         txt(dw->pTextFormatSmall, PX + 14.0f, paneY + 9.0f, paneRight - 14.0f, paneY + 27.0f,
-            pal.text, L"Frame timing is on \u2014 waiting for a full-screen app");
+            pal.text, i18n_bi::tr("settings.frame_wait",
+                L"Frame timing is on \u2014 waiting for a full-screen app"));
         txt(dw->pTextFormatLabel, PX + 14.0f, paneY + 28.0f, paneRight - 14.0f, paneY + 44.0f,
-            pal.muted, L"Open a game or 3D app and its frame data appears here.");
+            pal.muted, i18n_bi::tr("settings.frame_wait.desc",
+                L"Open a game or 3D app and its frame data appears here."));
 
         paneY += bannerH + CARD_GAP;
     }
@@ -2136,7 +2234,8 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
     {
         fillRR(PX, paneY, paneRight, paneY + 40.0f, 8.0f, pal.inset);
         txt(dw->pTextFormatLabel, PX + 14.0f, paneY, paneRight - 14.0f, paneY + 40.0f, pal.muted,
-            L"The overlay is off. These rows still save \u2014 nothing is drawn.");
+            i18n_bi::tr("settings.overlay_off",
+                L"The overlay is off. These rows still save \u2014 nothing is drawn."));
         paneY += 40.0f + CARD_GAP;
     }
 
@@ -2145,9 +2244,9 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
         float uH = 46.0f;
         card(PX, paneY, paneRight, paneY + uH);
         txt(dw->pTextFormatValue, PX + 14.0f, paneY, PX + 220.0f, paneY + uH, pal.text,
-            L"Memory units");
+            i18n_bi::tr("settings.mem_units", L"Memory units"));
 
-        const wchar_t *unitLabels[3] = {L"Auto", L"MB", L"GB"};
+        const wchar_t *unitLabels[3] = {i18n_bi::tr("units.auto", L"Auto"), L"MB", L"GB"};
         float segW = 56.0f;
         float segH = 26.0f;
         float segY = paneY + (uH - segH) * 0.5f;
@@ -2276,7 +2375,8 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
                             HIT_MOVEDOWN, i, nullptr);
             }
 
-            chip(dw, rowChipX, chipY, CHIP_ROW_W, L"Row", *row.show, dimmed);
+            chip(dw, rowChipX, chipY, CHIP_ROW_W, i18n_bi::tr("settings.row", L"Row"),
+                 *row.show, dimmed);
             if (row.available)
             {
                 if (isHovered(HIT_ROW_CHIP, i))
@@ -2287,7 +2387,8 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
 
             if (row.graph)
             {
-                chip(dw, graphChipX, chipY, CHIP_GRAPH_W, L"Graph", *row.graph, dimmed);
+                chip(dw, graphChipX, chipY, CHIP_GRAPH_W, i18n_bi::tr("settings.graph", L"Graph"),
+                     *row.graph, dimmed);
                 if (row.available)
                 {
                     if (isHovered(HIT_GRAPH_CHIP, i))
@@ -2315,7 +2416,8 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
             hoverFill(PX, btnY, PX + btnW, btnY + btnH, BTN_R);
         strokeRR(PX, btnY, PX + btnW, btnY + btnH, BTN_R, hot ? pal.faint : pal.border, 1.0f);
         txt(dw->pTextFormatLabel, PX, btnY, PX + btnW, btnY + btnH, pal.text,
-            L"Save profile for foreground app", DWRITE_TEXT_ALIGNMENT_CENTER);
+            i18n_bi::tr("settings.save_profile", L"Save profile for foreground app"),
+            DWRITE_TEXT_ALIGNMENT_CENTER);
 
         if (hot)
             hoverRing(PX, btnY, PX + btnW, btnY + btnH, BTN_R);
@@ -2327,7 +2429,8 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
     if (settingsGroup == GROUP_CPU && !ru->cpuInfo.packagePowerAvailable)
     {
         txt(dw->pTextFormatMicro, PX, paneBottom + 8.0f, paneRight, paneBottom + 23.0f, pal.faint,
-            L"Package power counter is not present on this machine.");
+            i18n_bi::tr("settings.no_package_power",
+                L"Package power counter is not present on this machine."));
         paneBottom += 23.0f;
     }
 
@@ -2364,8 +2467,9 @@ void draw_batteryinfo_bi::drawSettingsTab(ID2D1HwndRenderTarget *pRT, init_dwrit
     card(previewLeft, previewTop, previewRight, previewTop + previewH);
 
     eyebrow(dw, previewLeft + CARD_PAD, previewTop + 16.0f,
-            fit < 0.999f ? wfmt(L"PREVIEW \u00B7 %.0f%% OF ACTUAL SIZE", fit * 100.0)
-                         : std::wstring(L"PREVIEW \u00B7 ACTUAL SIZE"));
+            fit < 0.999f
+                ? wfmt(i18n_bi::trf("preview.scaled", L"PREVIEW \u00B7 %.0f%% OF ACTUAL SIZE"), fit * 100.0)
+                : std::wstring(i18n_bi::tr("preview.actual", L"PREVIEW \u00B7 ACTUAL SIZE")));
 
     drawOverlayPreview(dw, ov, ru, previewLeft + CARD_PAD, previewTop + 36.0f,
                        previewRight - CARD_PAD, previewTop + previewH - 16.0f);
@@ -2389,7 +2493,9 @@ float draw_batteryinfo_bi::drawRunCard(init_dwrite_bi *dw, float L, float R, flo
     eyebrow(dw, IX, y + 16.0f, title);
 
     txt(dw->pTextFormatSmall, IR - 320.0f, y + 14.0f, IR, y + 30.0f, pal.muted,
-        widen(s.process) + wfmt(L" \u00B7 %.0f s \u00B7 %u frames", s.seconds, (unsigned)s.frames),
+        widen(s.process) + L" " +
+            wfmt(i18n_bi::trf("capture.frames_meta", L"\u00B7 %.0f s \u00B7 %u frames"),
+                 s.seconds, (unsigned)s.frames),
         DWRITE_TEXT_ALIGNMENT_TRAILING, true);
 
     float colW = (IW - 32.0f) / 3.0f;
@@ -2400,29 +2506,29 @@ float draw_batteryinfo_bi::drawRunCard(init_dwrite_bi *dw, float L, float R, flo
 
     bool haveFrames = s.frames > 0;
 
-    statCell(dw, c1, rowY, colW, L"AVERAGE",
+    statCell(dw, c1, rowY, colW, i18n_bi::tr("capture.avg", L"AVERAGE"),
              haveFrames ? wfmt(L"%.1f fps", s.avgFps) : L"\u2014", !haveFrames);
-    statCell(dw, c2, rowY, colW, L"1% LOW",
+    statCell(dw, c2, rowY, colW, i18n_bi::tr("capture.low1", L"1% LOW"),
              s.low1Valid ? wfmt(L"%.1f fps", s.low1Fps) : L"\u2014", !s.low1Valid);
-    statCell(dw, c3, rowY, colW, L"0.1% LOW",
+    statCell(dw, c3, rowY, colW, i18n_bi::tr("capture.low01", L"0.1% LOW"),
              s.low01Valid ? wfmt(L"%.1f fps", s.low01Fps) : L"\u2014", !s.low01Valid);
 
     rowY += 52.0f;
 
-    statCell(dw, c1, rowY, colW, L"MEDIAN FRAME",
+    statCell(dw, c1, rowY, colW, i18n_bi::tr("capture.median", L"MEDIAN FRAME"),
              haveFrames ? wfmt(L"%.2f ms", s.medianMs) : L"\u2014", !haveFrames);
-    statCell(dw, c2, rowY, colW, L"WORST FRAME",
+    statCell(dw, c2, rowY, colW, i18n_bi::tr("capture.worst", L"WORST FRAME"),
              haveFrames ? wfmt(L"%.1f ms", s.maxMs) : L"\u2014", !haveFrames);
-    statCell(dw, c3, rowY, colW, L"STUTTERS",
+    statCell(dw, c3, rowY, colW, i18n_bi::tr("capture.stutters", L"STUTTERS"),
              haveFrames ? wfmt(L"%u", s.stutters) : L"\u2014", !haveFrames);
 
     rowY += 52.0f;
 
-    statCell(dw, c1, rowY, colW, L"CPU PACKAGE",
+    statCell(dw, c1, rowY, colW, i18n_bi::tr("capture.cpu_package", L"CPU PACKAGE"),
              s.packageValid ? wfmt(L"%.1f W", s.avgPackageW) : L"\u2014", !s.packageValid);
-    statCell(dw, c2, rowY, colW, L"ENERGY USED",
+    statCell(dw, c2, rowY, colW, i18n_bi::tr("capture.energy", L"ENERGY USED"),
              s.energyValid ? wfmt(L"%.2f Wh", s.energyWh) : L"\u2014", !s.energyValid);
-    statCell(dw, c3, rowY, colW, L"BATTERY LIFE",
+    statCell(dw, c3, rowY, colW, i18n_bi::tr("capture.battery_life", L"BATTERY LIFE"),
              s.projectionValid ? wfmt(L"%.1f h", s.projectedHours) : L"\u2014",
              !s.projectionValid);
 
@@ -2433,12 +2539,14 @@ float draw_batteryinfo_bi::drawRunCard(init_dwrite_bi *dw, float L, float R, flo
     if (effOk)
     {
         txt(dw->pTextFormatMicro, IX, rowY, IR, rowY + 15.0f, pal.faint,
-            wfmt(L"%.0f frames per watt-hour", (double)s.frames / s.energyWh));
+            wfmt(i18n_bi::trf("capture.per_wh", L"%.0f frames per watt-hour"),
+                 (double)s.frames / s.energyWh));
     }
     else
     {
         txt(dw->pTextFormatMicro, IX, rowY, IR, rowY + 15.0f, pal.faint,
-            L"Package power was not readable, so energy could not be measured.");
+            i18n_bi::tr("capture.no_power",
+                L"Package power was not readable, so energy could not be measured."));
     }
 
     return 232.0f;
@@ -2458,7 +2566,7 @@ void draw_batteryinfo_bi::drawCaptureTab(ID2D1HwndRenderTarget *pRT, init_dwrite
     float y = TABBAR_H + PAD + shift;
 
     card(L, y, R, y + 128.0f);
-    eyebrow(dw, IX, y + 16.0f, L"SESSION");
+    eyebrow(dw, IX, y + 16.0f, i18n_bi::tr("capture.session", L"SESSION"));
 
     if (cap.recording)
     {
@@ -2470,43 +2578,49 @@ void draw_batteryinfo_bi::drawCaptureTab(ID2D1HwndRenderTarget *pRT, init_dwrite
             wfmt(L"%d:%02d", mins, secs));
 
         txt(dw->pTextFormatSmall, IR - 260.0f, y + 32.0f, IR, y + 50.0f, pal.muted,
-            wfmt(L"%u frames", (unsigned)cap.frames), DWRITE_TEXT_ALIGNMENT_TRAILING);
+            wfmt(i18n_bi::trf("capture.frames", L"%u frames"), (unsigned)cap.frames),
+            DWRITE_TEXT_ALIGNMENT_TRAILING);
         txt(dw->pTextFormatSmall, IR - 260.0f, y + 50.0f, IR, y + 68.0f, pal.muted,
             cap.liveLow1Valid
-                ? wfmt(L"%.0f fps avg \u00B7 %.0f low", cap.liveFps, cap.liveLow1)
-                : wfmt(L"%.0f fps avg", cap.liveFps),
+                ? wfmt(i18n_bi::trf("capture.fps_low", L"%.0f fps avg \u00B7 %.0f low"),
+                       cap.liveFps, cap.liveLow1)
+                : wfmt(i18n_bi::trf("capture.fps_avg", L"%.0f fps avg"), cap.liveFps),
             DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-        button(dw, IX, y + 80.0f, 160.0f, L"Stop and save", true,
-               isHovered(HIT_ACTION, ACT_TOGGLE_CAPTURE));
+        button(dw, IX, y + 80.0f, 160.0f, i18n_bi::tr("capture.stop_save", L"Stop and save"),
+               true, isHovered(HIT_ACTION, ACT_TOGGLE_CAPTURE));
     }
     else if (cap.finalizing)
     {
         txt(dw->pTextFormatStrong, IX, y + 32.0f, IR, y + 52.0f, pal.text,
-            L"Saving capture...");
+            i18n_bi::tr("capture.saving", L"Saving capture..."));
         txt(dw->pTextFormatSmall, IX, y + 54.0f, IR, y + 72.0f, pal.muted,
-            L"The frame CSV and summary are being written in the background.");
+            i18n_bi::tr("capture.saving.desc",
+                L"The frame CSV and summary are being written in the background."));
 
-        button(dw, IX, y + 80.0f, 160.0f, L"Please wait", false, false);
+        button(dw, IX, y + 80.0f, 160.0f, i18n_bi::tr("capture.wait", L"Please wait"),
+               false, false);
     }
     else if (cap.finalizeFailed)
     {
         txt(dw->pTextFormatStrong, IX, y + 32.0f, IR, y + 52.0f, pal.bad,
-            L"The last run could not be saved");
+            i18n_bi::tr("capture.failed", L"The last run could not be saved"));
         txt(dw->pTextFormatSmall, IX, y + 54.0f, IR, y + 72.0f, pal.muted,
-            L"Nothing reached the captures folder. kestrel.log records why.");
+            i18n_bi::tr("capture.failed.desc",
+                L"Nothing reached the captures folder. kestrel.log records why."));
 
-        button(dw, IX, y + 80.0f, 160.0f, L"Start recording", true,
+        button(dw, IX, y + 80.0f, 160.0f, i18n_bi::tr("capture.start", L"Start recording"), true,
                isHovered(HIT_ACTION, ACT_TOGGLE_CAPTURE));
     }
     else
     {
         txt(dw->pTextFormatStrong, IX, y + 32.0f, IR, y + 52.0f, pal.text,
-            L"Record a run and measure it");
+            i18n_bi::tr("capture.record_title", L"Record a run and measure it"));
         txt(dw->pTextFormatSmall, IX, y + 54.0f, IR, y + 72.0f, pal.muted,
-            L"Frame times, package power and what the run cost the battery.");
+            i18n_bi::tr("capture.record_desc",
+                L"Frame times, package power and what the run cost the battery."));
 
-        button(dw, IX, y + 80.0f, 160.0f, L"Start recording", true,
+        button(dw, IX, y + 80.0f, 160.0f, i18n_bi::tr("capture.start", L"Start recording"), true,
                isHovered(HIT_ACTION, ACT_TOGGLE_CAPTURE));
     }
 
@@ -2517,12 +2631,12 @@ void draw_batteryinfo_bi::drawCaptureTab(ID2D1HwndRenderTarget *pRT, init_dwrite
     }
 
     txt(dw->pTextFormatMicro, IX + 172.0f, y + 80.0f, IR, y + 112.0f, pal.faint,
-        L"or press Ctrl+Alt+B anywhere");
+        i18n_bi::tr("capture.hotkey", L"or press Ctrl+Alt+B anywhere"));
 
     y += 128.0f + CARD_GAP;
 
     if (cap.hasLast)
-        y += drawRunCard(dw, L, R, y, cap.last, L"LAST RUN") + CARD_GAP;
+        y += drawRunCard(dw, L, R, y, cap.last, i18n_bi::tr("capture.last_run", L"LAST RUN")) + CARD_GAP;
 
     float rowPitch = 40.0f;
     size_t historyRows = cap.history.size();
@@ -2536,17 +2650,18 @@ void draw_batteryinfo_bi::drawCaptureTab(ID2D1HwndRenderTarget *pRT, init_dwrite
         historyH = 64.0f;
 
     card(L, y, R, y + historyH);
-    eyebrow(dw, IX, y + 16.0f, L"SAVED RUNS");
+    eyebrow(dw, IX, y + 16.0f, i18n_bi::tr("capture.saved", L"SAVED RUNS"));
 
     if (cap.history.empty())
     {
         txt(dw->pTextFormatSmall, IX, y + 34.0f, IR, y + 52.0f, pal.faint,
-            L"Nothing recorded yet.");
+            i18n_bi::tr("capture.none", L"Nothing recorded yet."));
     }
     else
     {
         txt(dw->pTextFormatMicro, IR - 220.0f, y + 18.0f, IR, y + 32.0f, pal.faint,
-            L"Click a run to see its full stats", DWRITE_TEXT_ALIGNMENT_TRAILING);
+            i18n_bi::tr("capture.click", L"Click a run to see its full stats"),
+            DWRITE_TEXT_ALIGNMENT_TRAILING);
 
         float listY = y + 40.0f;
 
@@ -2604,15 +2719,15 @@ void draw_batteryinfo_bi::drawCaptureTab(ID2D1HwndRenderTarget *pRT, init_dwrite
 
             if (sel)
                 listY += drawRunCard(dw, IX - CARD_PAD + 10.0f, IR + CARD_PAD - 10.0f,
-                                     listY, h, L"RUN DETAIL") +
+                                     listY, h, i18n_bi::tr("capture.run_detail", L"RUN DETAIL")) +
                          CARD_GAP;
         }
     }
 
     y += historyH + CARD_GAP;
 
-    button(dw, L, y, 150.0f, L"Open captures folder", false,
-           isHovered(HIT_ACTION, ACT_OPEN_CAPTURES));
+    button(dw, L, y, 150.0f, i18n_bi::tr("capture.open_folder", L"Open captures folder"),
+           false, isHovered(HIT_ACTION, ACT_OPEN_CAPTURES));
     pushHit(D2D1::RectF(L, y, L + 150.0f, y + BTN_H), HIT_ACTION, ACT_OPEN_CAPTURES, nullptr);
 
     y += BTN_H + PAD;
@@ -2620,7 +2735,8 @@ void draw_batteryinfo_bi::drawCaptureTab(ID2D1HwndRenderTarget *pRT, init_dwrite
     contentHeight = y + scrollOffsetY + FOOTER_H;
     clampScroll();
 
-    drawFooter(dw, L"Frame times are written as CSV, one row per frame.");
+    drawFooter(dw, i18n_bi::tr("capture.footer",
+        L"Frame times are written as CSV, one row per frame."));
     drawScrollbar();
 }
 
@@ -2628,6 +2744,12 @@ void draw_batteryinfo_bi::drawAppearanceTab(ID2D1HwndRenderTarget *pRT, init_dwr
                                             overlay_bi *ov)
 {
     beginFrame(pRT);
+
+    static const wchar_t *CORNER_NAMES[] = {
+        i18n_bi::tr("corner.tl", L"Top left"),
+        i18n_bi::tr("corner.tr", L"Top right"),
+        i18n_bi::tr("corner.bl", L"Bottom left"),
+        i18n_bi::tr("corner.br", L"Bottom right")};
 
     float L = contentLeft();
     float R = contentRight();
@@ -2651,7 +2773,7 @@ void draw_batteryinfo_bi::drawAppearanceTab(ID2D1HwndRenderTarget *pRT, init_dwr
     // Size the card to the actual grid; a fixed height left the last rows
     // spilling outside the card.
     card(L, y, R, themeGridBottom + 14.0f);
-    eyebrow(dw, IX, y + 16.0f, L"THEME");
+    eyebrow(dw, IX, y + 16.0f, i18n_bi::tr("appearance.theme", L"THEME"));
 
     for (int i = 0; i < THEME_COUNT; ++i)
     {
@@ -2692,7 +2814,7 @@ void draw_batteryinfo_bi::drawAppearanceTab(ID2D1HwndRenderTarget *pRT, init_dwr
             bx + 28.0f, previewY + row * (chipH + gap) + 6.0f,
             bx + previewW - 4.0f, previewY + row * (chipH + gap) + 22.0f,
             selected ? active : pal.text,
-            widen(std::string(themeName(i))));
+            themeName(i));
 
         float barY = previewY + row * (chipH + gap) + 30.0f;
         D2D1_COLOR_F barPal[4] = {swatch, c(0x7FB894), c(0xD9B585), c(0xC98C8C)};
@@ -2712,7 +2834,7 @@ void draw_batteryinfo_bi::drawAppearanceTab(ID2D1HwndRenderTarget *pRT, init_dwr
     y = themeGridBottom + 14.0f + CARD_GAP;
 
     card(L, y, R, y + 146.0f);
-    eyebrow(dw, IX, y + 16.0f, L"ACCENT");
+    eyebrow(dw, IX, y + 16.0f, i18n_bi::tr("appearance.accent", L"ACCENT"));
 
     float swatchY = y + 39.0f;
     for (size_t i = 0; i < colorPalette.size(); ++i)
@@ -2740,12 +2862,13 @@ void draw_batteryinfo_bi::drawAppearanceTab(ID2D1HwndRenderTarget *pRT, init_dwr
     }
 
     txt(dw->pTextFormatMicro, IX, y + 127.0f, IR, y + 142.0f, pal.faint,
-        L"Used for highlights, the charge bar and selected controls.");
+        i18n_bi::tr("appearance.accent.desc",
+            L"Used for highlights, the charge bar and selected controls."));
 
     y += 146.0f + CARD_GAP;
 
     card(L, y, R, y + 145.0f);
-    eyebrow(dw, IX, y + 16.0f, L"OVERLAY POSITION");
+    eyebrow(dw, IX, y + 16.0f, i18n_bi::tr("appearance.position", L"OVERLAY POSITION"));
 
     float boxY = y + 39.0f;
     float boxW = 108.0f;
@@ -2783,7 +2906,7 @@ void draw_batteryinfo_bi::drawAppearanceTab(ID2D1HwndRenderTarget *pRT, init_dwr
 
     // Graph height (moved here from the Settings tab). Draggable slider.
     card(L, y, R, y + 74.0f);
-    eyebrow(dw, IX, y + 16.0f, L"GRAPH HEIGHT");
+    eyebrow(dw, IX, y + 16.0f, i18n_bi::tr("appearance.graph_height", L"GRAPH HEIGHT"));
     txt(dw->pTextFormatSmall, IR - 90.0f, y + 12.0f, IR, y + 30.0f, pal.text,
         wfmt(L"%.1fx", ov ? ov->graphHeightMultiplier : 1.0f), DWRITE_TEXT_ALIGNMENT_TRAILING);
     if (ov)
@@ -2812,9 +2935,9 @@ void draw_batteryinfo_bi::drawAppearanceTab(ID2D1HwndRenderTarget *pRT, init_dwr
 
     card(L, y, R, y + 246.0f);
     txt(dw->pTextFormatValue, IX, y + 16.0f, IX + 300.0f, y + 34.0f, pal.text,
-        L"Refresh rate");
+        i18n_bi::tr("appearance.refresh", L"Refresh rate"));
     txt(dw->pTextFormatMicro, IX, y + 36.0f, IX + 340.0f, y + 51.0f, pal.faint,
-        L"Slower redraws cost less while playing");
+        i18n_bi::tr("appearance.refresh.desc", L"Slower redraws cost less while playing"));
 
     const int RATES[4] = {50, 100, 250, 500};
     float rateX = IR - 4.0f * 52.0f - 3.0f * 6.0f;
@@ -2852,9 +2975,9 @@ void draw_batteryinfo_bi::drawAppearanceTab(ID2D1HwndRenderTarget *pRT, init_dwr
     y += 58.0f;
 
     txt(dw->pTextFormatValue, IX, y + 16.0f, IX + 300.0f, y + 34.0f, pal.text,
-        L"Overlay scale");
+        i18n_bi::tr("appearance.scale", L"Overlay scale"));
     txt(dw->pTextFormatMicro, IX, y + 36.0f, IX + 340.0f, y + 51.0f, pal.faint,
-        L"Size of the in-game panel and its text");
+        i18n_bi::tr("appearance.scale.desc", L"Size of the in-game panel and its text"));
 
     float scStepY = y + 21.0f;
     float scMinusX = IR - 108.0f;
@@ -2883,9 +3006,9 @@ void draw_batteryinfo_bi::drawAppearanceTab(ID2D1HwndRenderTarget *pRT, init_dwr
     y += 58.0f;
 
     txt(dw->pTextFormatValue, IX, y + 16.0f, IX + 300.0f, y + 34.0f, pal.text,
-        L"Overlay margin");
+        i18n_bi::tr("appearance.margin", L"Overlay margin"));
     txt(dw->pTextFormatMicro, IX, y + 36.0f, IX + 320.0f, y + 51.0f, pal.faint,
-        L"Distance from the screen edge");
+        i18n_bi::tr("appearance.margin.desc", L"Distance from the screen edge"));
 
     float stepY = y + 21.0f;
     float minusX = IR - 108.0f;
@@ -2914,9 +3037,9 @@ void draw_batteryinfo_bi::drawAppearanceTab(ID2D1HwndRenderTarget *pRT, init_dwr
     y += 58.0f;
 
     txt(dw->pTextFormatValue, IX, y + 16.0f, IX + 300.0f, y + 34.0f, pal.text,
-        L"Overlay opacity");
+        i18n_bi::tr("appearance.opacity", L"Overlay opacity"));
     txt(dw->pTextFormatMicro, IX, y + 36.0f, IX + 340.0f, y + 51.0f, pal.faint,
-        L"Transparency of the in-game panel");
+        i18n_bi::tr("appearance.opacity.desc", L"Transparency of the in-game panel"));
 
     float alStepY = y + 21.0f;
     float alMinusX = IR - 108.0f;
@@ -2965,26 +3088,28 @@ void draw_batteryinfo_bi::drawAboutTab(ID2D1HwndRenderTarget *pRT, init_dwrite_b
 
     txt(dw->pTextFormatTitle, IX + 64.0f, y + 21.0f, IX + 320.0f, y + 53.0f, pal.text, L"Kestrel");
     txt(dw->pTextFormatLabel, IX + 64.0f, y + 54.0f, IX + 360.0f, y + 70.0f, pal.muted,
-        wfmt(L"Version %d.%d.%d \u00B7 portable build",
+        wfmt(i18n_bi::trf("about.version", L"Version %d.%d.%d \u00B7 portable build"),
              APP_VERSION_MAJOR, APP_VERSION_MINOR, APP_VERSION_PATCH));
 
     txt(dw->pTextFormatSmall, IX, y + 89.0f, IR, y + 107.0f, pal.muted,
-        L"Battery health, CPU and GPU load, package power and real");
+        i18n_bi::tr("about.desc1",
+            L"Battery health, CPU and GPU load, package power and real"));
     txt(dw->pTextFormatSmall, IX, y + 107.0f, IR, y + 125.0f, pal.muted,
-        L"per-application frame timing, in an always-on-top overlay.");
+        i18n_bi::tr("about.desc2",
+            L"per-application frame timing, in an always-on-top overlay."));
 
-    button(dw, IX, y + 137.0f, 96.0f, L"Repository", false,
-           isHovered(HIT_ACTION, ACT_OPEN_REPO));
+    button(dw, IX, y + 137.0f, 96.0f, i18n_bi::tr("about.repository", L"Repository"),
+           false, isHovered(HIT_ACTION, ACT_OPEN_REPO));
     pushHit(D2D1::RectF(IX, y + 137.0f, IX + 96.0f, y + 137.0f + BTN_H),
             HIT_ACTION, ACT_OPEN_REPO, nullptr);
 
-    button(dw, IX + 106.0f, y + 137.0f, 116.0f, L"Report an issue", false,
-           isHovered(HIT_ACTION, ACT_OPEN_ISSUES));
+    button(dw, IX + 106.0f, y + 137.0f, 116.0f, i18n_bi::tr("about.issue", L"Report an issue"),
+           false, isHovered(HIT_ACTION, ACT_OPEN_ISSUES));
     pushHit(D2D1::RectF(IX + 106.0f, y + 137.0f, IX + 222.0f, y + 137.0f + BTN_H),
             HIT_ACTION, ACT_OPEN_ISSUES, nullptr);
 
-    button(dw, IX + 232.0f, y + 137.0f, 74.0f, L"Licence", false,
-           isHovered(HIT_ACTION, ACT_OPEN_LICENCE));
+    button(dw, IX + 232.0f, y + 137.0f, 74.0f, i18n_bi::tr("about.licence", L"Licence"),
+           false, isHovered(HIT_ACTION, ACT_OPEN_LICENCE));
     pushHit(D2D1::RectF(IX + 232.0f, y + 137.0f, IX + 306.0f, y + 137.0f + BTN_H),
             HIT_ACTION, ACT_OPEN_LICENCE, nullptr);
 
@@ -2992,57 +3117,61 @@ void draw_batteryinfo_bi::drawAboutTab(ID2D1HwndRenderTarget *pRT, init_dwrite_b
 
     float updateH = 116.0f;
     card(L, y, R, y + updateH);
-    eyebrow(dw, IX, y + 16.0f, L"UPDATES");
+    eyebrow(dw, IX, y + 16.0f, i18n_bi::tr("about.updates", L"UPDATES"));
 
     std::wstring status;
     D2D1_COLOR_F statusColor = pal.muted;
 
-    std::wstring primaryLabel = L"Check for updates";
+    std::wstring primaryLabel = i18n_bi::tr("about.check", L"Check for updates");
     int primaryAction = ACT_CHECK_UPDATE;
     bool primaryEnabled = true;
 
     switch (upd.state)
     {
     case 1:
-        status = L"Contacting GitHub\u2026";
-        primaryLabel = L"Checking\u2026";
+        status = i18n_bi::tr("about.contacting", L"Contacting GitHub\u2026");
+        primaryLabel = i18n_bi::tr("about.checking", L"Checking\u2026");
         primaryEnabled = false;
         break;
 
     case 2:
-        status = wfmt(L"%d.%d.%d is the newest release",
+        status = wfmt(i18n_bi::trf("about.newest", L"%d.%d.%d is the newest release"),
                       APP_VERSION_MAJOR, APP_VERSION_MINOR, APP_VERSION_PATCH);
         statusColor = pal.ok;
         break;
 
     case 3:
-        status = L"Version " + widen(upd.version) + L" is available";
+        status = wfmt(i18n_bi::trf("about.update_available", L"Version %ls is available"),
+                      widen(upd.version).c_str());
         statusColor = pal.warn;
-        primaryLabel = L"Download " + widen(upd.version);
+        primaryLabel = wfmt(i18n_bi::trf("about.download", L"Download %ls"),
+                            widen(upd.version).c_str());
         primaryAction = ACT_DOWNLOAD_UPDATE;
         break;
 
     case 4:
-        status = wfmt(L"Downloading\u2026 %d%%", upd.progress);
-        primaryLabel = L"Downloading\u2026";
+        status = wfmt(i18n_bi::trf("about.downloading_pct", L"Downloading\u2026 %d%%"), upd.progress);
+        primaryLabel = i18n_bi::tr("about.downloading", L"Downloading\u2026");
         primaryEnabled = false;
         break;
 
     case 5:
-        status = L"Version " + widen(upd.version) + L" is ready to install";
+        status = wfmt(i18n_bi::trf("about.update_ready", L"Version %ls is ready to install"),
+                      widen(upd.version).c_str());
         statusColor = pal.ok;
-        primaryLabel = L"Install and restart";
+        primaryLabel = i18n_bi::tr("about.install", L"Install and restart");
         primaryAction = ACT_INSTALL_UPDATE;
         break;
 
     case 6:
         status = widen(upd.message);
         statusColor = pal.bad;
-        primaryLabel = L"Try again";
+        primaryLabel = i18n_bi::tr("about.retry", L"Try again");
         break;
 
     default:
-        status = L"Kestrel does not check for updates on its own.";
+        status = i18n_bi::tr("about.no_check",
+            L"Kestrel does not check for updates on its own.");
         break;
     }
 
@@ -3077,8 +3206,9 @@ void draw_batteryinfo_bi::drawAboutTab(ID2D1HwndRenderTarget *pRT, init_dwrite_b
         float rollW = 158.0f;
 
         std::wstring rollLabel = upd.backupVersion.empty()
-                                     ? L"Roll back"
-                                     : (L"Roll back to " + widen(upd.backupVersion));
+                                     ? i18n_bi::tr("about.rollback", L"Roll back")
+                                     : wfmt(i18n_bi::trf("about.rollback_to", L"Roll back to %ls"),
+                                            widen(upd.backupVersion).c_str());
 
         button(dw, rollX, btnY, rollW, rollLabel, false, isHovered(HIT_ACTION, ACT_ROLLBACK));
         pushHit(D2D1::RectF(rollX, btnY, rollX + rollW, btnY + BTN_H),
@@ -3089,7 +3219,8 @@ void draw_batteryinfo_bi::drawAboutTab(ID2D1HwndRenderTarget *pRT, init_dwrite_b
 
     float diagH = 335.0f;
     card(L, y, R, y + diagH);
-    eyebrow(dw, IX, y + 16.0f, L"WHAT KESTREL CAN READ ON THIS MACHINE");
+    eyebrow(dw, IX, y + 16.0f,
+            i18n_bi::tr("about.diag_title", L"WHAT KESTREL CAN READ ON THIS MACHINE"));
 
     struct diag_row
     {
@@ -3100,33 +3231,41 @@ void draw_batteryinfo_bi::drawAboutTab(ID2D1HwndRenderTarget *pRT, init_dwrite_b
 
     std::vector<diag_row> lines;
 
-    diag_row d0 = {L"Frame timing (ETW)",
-                   diag.frameTiming ? L"Active" : widen(diag.frameReason),
+    diag_row d0 = {i18n_bi::tr("about.diag_frame", L"Frame timing (ETW)"),
+                   diag.frameTiming ? i18n_bi::tr("about.active", L"Active")
+                                    : widen(diag.frameReason),
                    diag.frameTiming};
     if (d0.status.empty())
-        d0.status = L"Unavailable";
+        d0.status = i18n_bi::tr("about.unavailable", L"Unavailable");
     lines.push_back(d0);
 
-    diag_row d1 = {L"CPU package power",
-                   diag.cpuPower ? L"Energy Meter counter" : L"Counter not present",
+    diag_row d1 = {i18n_bi::tr("about.diag_cpu_power", L"CPU package power"),
+                   diag.cpuPower ? i18n_bi::tr("about.energy_meter", L"Energy Meter counter")
+                                 : i18n_bi::tr("about.counter_missing", L"Counter not present"),
                    diag.cpuPower};
     lines.push_back(d1);
 
-    diag_row d2 = {L"GPU load",
-                   diag.gpuName.empty() ? L"No adapter" : widen(diag.gpuName),
+    diag_row d2 = {i18n_bi::tr("about.diag_gpu", L"GPU load"),
+                   diag.gpuName.empty() ? i18n_bi::tr("about.no_adapter", L"No adapter")
+                                        : widen(diag.gpuName),
                    !diag.gpuName.empty()};
     lines.push_back(d2);
 
-    diag_row d3 = {L"Battery",
-                   diag.battery ? (L"1 device \u00B7 " + widen(diag.chemistry)) : L"No device",
+    diag_row d3 = {i18n_bi::tr("about.diag_battery", L"Battery"),
+                   diag.battery ? wfmt(i18n_bi::trf("about.one_device", L"1 device \u00B7 %ls"),
+                                       widen(diag.chemistry).c_str())
+                                : i18n_bi::tr("about.no_device", L"No device"),
                    diag.battery};
     lines.push_back(d3);
 
-    diag_row d4 = {L"Per-core load", wfmt(L"%d threads", diag.threads), diag.threads > 0};
+    diag_row d4 = {i18n_bi::tr("about.diag_per_core", L"Per-core load"),
+                   wfmt(i18n_bi::trf("about.threads", L"%d threads"), diag.threads),
+                   diag.threads > 0};
     lines.push_back(d4);
 
-    diag_row d5 = {L"Global hotkeys",
-                    diag.hotkeys ? L"Registered" : widen(diag.hotkeyReason),
+    diag_row d5 = {i18n_bi::tr("about.diag_hotkeys", L"Global hotkeys"),
+                    diag.hotkeys ? i18n_bi::tr("about.registered", L"Registered")
+                                 : widen(diag.hotkeyReason),
                     diag.hotkeys};
     lines.push_back(d5);
 
@@ -3146,8 +3285,8 @@ void draw_batteryinfo_bi::drawAboutTab(ID2D1HwndRenderTarget *pRT, init_dwrite_b
     }
 
     float logY = y + diagH - 46.0f;
-    button(dw, IX, logY - 1.0f, 110.0f, L"Open log file", false,
-           isHovered(HIT_ACTION, ACT_OPEN_LOG));
+    button(dw, IX, logY - 1.0f, 110.0f, i18n_bi::tr("about.open_log", L"Open log file"),
+           false, isHovered(HIT_ACTION, ACT_OPEN_LOG));
     pushHit(D2D1::RectF(IX, logY - 1.0f, IX + 110.0f, logY + 31.0f),
             HIT_ACTION, ACT_OPEN_LOG, nullptr);
 
@@ -3156,7 +3295,7 @@ void draw_batteryinfo_bi::drawAboutTab(ID2D1HwndRenderTarget *pRT, init_dwrite_b
     contentHeight = y + scrollOffsetY + FOOTER_H;
     clampScroll();
 
-    drawFooter(dw, L"MIT licence \u00B7 github.com/semiloker/Kestrel");
+    drawFooter(dw, i18n_bi::tr("about.footer", L"MIT licence \u00B7 github.com/semiloker/Kestrel"));
     drawScrollbar();
 }
 

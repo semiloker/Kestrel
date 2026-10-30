@@ -4,6 +4,25 @@ Notable changes per release. Dates are the release tag dates; before 1.5.0 the
 commit messages were the only release notes, so those entries are summaries
 rather than complete lists.
 
+## Unreleased
+
+### Added
+
+- Simplified Chinese translation (`lang/zh.lang`), included in the release ZIP
+  and MSIX. Enable it with `ui.language=zh` in `settings.ini`. Contributed by
+  @Discover999.
+
+### Changed
+
+- The main window, tray menu and dialogs now go through the language files
+  instead of only the first-run wizard. Contributed by @Discover999.
+
+### Security
+
+- A translated format string is ignored unless its conversions match the
+  English original, so a language file cannot make the formatter misread its
+  arguments.
+
 ## 1.5.0 - 2026-08-16
 
 ### Added

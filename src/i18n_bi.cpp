@@ -136,3 +136,17 @@ const wchar_t *i18n_bi::tr(const char *key, const wchar_t *fallback)
         return it->second.c_str();
     return fallback;
 }
+
+const wchar_t *i18n_bi::trf(const char *key, const wchar_t *fallback)
+{
+    std::map<std::string, std::wstring>::iterator it = g_table.find(key);
+    if (it == g_table.end() || it->second.empty())
+        return fallback;
+    if (formatCompatible(it->second.c_str(), fallback))
+        return it->second.c_str();
+
+    // Erased so a bad entry logs once instead of once per frame.
+    log_bi::write("i18n: '%s' does not match the English format, using English", key);
+    g_table.erase(it);
+    return fallback;
+}

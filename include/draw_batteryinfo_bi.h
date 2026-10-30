@@ -216,7 +216,7 @@ public:
     // user's chosen accent (used by brush rebuilds); true resets to the theme's
     // default accent (used when the user actively picks a theme).
     void setTheme(int index, bool resetAccent = true);
-    static const char *themeName(int index);
+    static const wchar_t *themeName(int index);
     bool themeIsNight(int index) const;
 
     int getSettingsGroup() const { return settingsGroup; }

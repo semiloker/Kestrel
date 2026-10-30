@@ -25,7 +25,7 @@ Kestrel is a native Windows desktop overlay/HUD application written in C++20. It
 | `packaging/` | Distribution manifests: `winget/`, `scoop/`, `chocolatey/`, `msix/`. |
 | `.github/workflows/` | `ci.yml` (build/test/lint matrix), `release.yml` (tag-gated signed release pipeline). |
 | `assets/` | Icon/logo source assets consumed by the resource compiler and packaging. |
-| `lang/` | `example.lang` — i18n string-table template. |
+| `lang/` | `example.lang` — i18n string-table template. `zh.lang` — Simplified Chinese. |
 
 ### Naming convention
 

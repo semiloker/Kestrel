@@ -267,6 +267,13 @@ hand while Kestrel is closed. Profile section names are encoded so arbitrary
 executable names cannot alter the INI structure. Deleting the file resets
 everything.
 
+The interface is English by default. To use another language, add
+`ui.language=zh` to `settings.ini` while Kestrel is closed. Kestrel looks for
+`<code>.lang` next to `kestrel.exe`, then in `%APPDATA%\Kestrel`. The release ZIP
+and MSIX include `zh.lang`; if you installed only `kestrel.exe`, copy
+[`lang/zh.lang`](lang/zh.lang) to either location. Overlay metric labels stay in
+English to keep the panel's fixed-width columns aligned.
+
 Use **Save profile for foreground app** to store the current presentation for
 one executable. Kestrel applies that profile when the executable becomes the
 measurement target.

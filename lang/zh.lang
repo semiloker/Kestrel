@@ -1,0 +1,326 @@
+# Kestrel 简体中文翻译。
+# 用法：把本文件放到 kestrel.exe 同目录或 %APPDATA%\Kestrel，
+# 并在 settings.ini 里设置 ui.language=zh。
+# UTF-8 编码，每行一条 key=value，# 为注释。省略的 key 会自动回退英文。
+
+# --- 首启向导 ---
+wizard.title=Kestrel 设置
+wizard.welcome=欢迎使用 Kestrel
+wizard.intro=一个始终置顶的悬浮窗，用于显示电池、系统负载和帧时间。选择它停靠的位置和启动方式。
+wizard.admin=启用帧计时\n以管理员身份随 Windows 启动，这样 FPS 和帧时间指标才能工作（使用 ETW）。
+wizard.basic=以基础模式继续\n电池、CPU、GPU 和功耗无需管理员权限即可工作。之后可在设置中更改。
+wizard.autostart=随 Windows 自动启动 Kestrel
+
+# --- 角落 ---
+corner.tl=左上角
+corner.tr=右上角
+corner.bl=左下角
+corner.br=右下角
+
+# --- 设置分组 ---
+group.overlay=悬浮窗
+group.frame=帧计时
+group.gpu=GPU
+group.cpu=CPU
+group.battery=电池
+group.memory=内存
+group.behavior=行为
+group.overlay.desc=除指标外，面板还显示的内容。
+group.frame.desc=帧率和每帧 GPU 时间，来自 ETW。
+group.gpu.desc=显卡负载与标识。
+group.cpu.desc=处理器负载、封装功耗与标识。
+group.battery.desc=镜像到悬浮窗的电池读数。
+group.memory.desc=物理内存、提交内存和虚拟内存。
+group.behavior.desc=Kestrel 自身的行为方式。
+
+# --- 预设 ---
+preset.minimal=精简
+preset.gaming=游戏
+preset.everything=全部
+
+# --- 顶部标签页 ---
+tab.battery=电池
+tab.settings=设置
+tab.capture=录制
+tab.appearance=外观
+tab.about=关于
+
+# --- 主题 ---
+theme.dark=深色
+theme.light=浅色
+theme.nord=Nord
+theme.dracula=Dracula
+theme.gruvbox=Gruvbox
+theme.deuteranopia_dark=绿色盲（深色）
+theme.deuteranopia_light=绿色盲（浅色）
+theme.protanopia_dark=红色盲（深色）
+theme.protanopia_light=红色盲（浅色）
+theme.tritanopia_dark=蓝色盲（深色）
+theme.tritanopia_light=蓝色盲（浅色）
+
+# --- 指标开关（悬浮窗） ---
+metric.display_info=显示信息行
+metric.display_info.desc=顶部的显示器、分辨率和刷新率
+metric.frame_percentiles=帧时间百分位
+metric.frame_percentiles.desc=最差 1% 和 0.1% 低帧率 (LOW:)
+metric.network=网络速度
+metric.network.desc=下载和上传速度 (DW:/UP:)
+metric.disk=磁盘使用
+metric.disk.desc=系统盘已用空间 (DSK:)
+metric.frame_rate=帧率
+metric.frame_rate.desc=每秒帧数 (FPS:)，独立刻度
+metric.frame_interval=帧间隔
+metric.frame_interval.desc=帧与帧之间的毫秒数 (PRE:)
+metric.gpu_ms=GPU 毫秒
+metric.gpu_ms.desc=每帧 GPU 渲染时间 (GPU: ms)
+metric.bottleneck=CPU 或 GPU 瓶颈
+metric.bottleneck.desc=哪一方限制了帧率 (BND:)
+metric.gpu_load=负载
+metric.gpu_load.desc=GPU 忙碌百分比 (GPU: %)
+metric.vram=显存
+metric.vram.desc=显存已用与总量 (VRM:)
+metric.gpu_temp=温度
+metric.gpu_temp.desc=来自显卡驱动的 GPU 核心温度 (GPU: C)
+metric.gpu_power=功耗
+metric.gpu_power.desc=来自能耗计数的 GPU 瓦数 (GPU: W)
+metric.gpu_fan=风扇转速
+metric.gpu_fan.desc=显卡风扇转速 (GPU: RPM)
+metric.adapter_name=显卡名称
+metric.adapter_name.desc=显卡型号
+metric.per_adapter_vram=每显卡显存
+metric.per_adapter_vram.desc=分别显示每个显卡的显存
+metric.cpu_load=负载
+metric.cpu_load.desc=总 CPU 占用率 (CPU: %)
+metric.cpu_temp=温度
+metric.cpu_temp.desc=通过 MSI Afterburner 的 CPU 核心温度 (CPU: C)
+metric.cpu_temp.approx.desc=ACPI 区域 (CPU: C) - 近似值，请运行 Afterburner 获取核心温度
+metric.package_power=封装功耗
+metric.package_power.desc=CPU 封装瓦数 (CPU: W)
+metric.frames_per_watt=每瓦帧数
+metric.frames_per_watt.desc=每 CPU 瓦特提供的 FPS (EFF:)
+metric.per_core=每核心负载
+metric.per_core.desc=每个逻辑核心的占用率
+metric.processor_name=处理器名称
+metric.processor_name.desc=CPU 型号，显示在显卡上方
+metric.architecture=架构
+metric.architecture.desc=指令集，例如 x64 (ARCH:)
+metric.batt_voltage=电压
+metric.batt_voltage.desc=电池端电压
+metric.batt_power=功耗
+metric.batt_power.desc=充电或放电瓦数
+metric.batt_state=电源状态
+metric.batt_state.desc=充电、放电或空闲
+metric.batt_remaining=剩余容量
+metric.batt_remaining.desc=剩余电量（瓦时）
+metric.batt_charge=电量
+metric.batt_charge.desc=电池百分比
+metric.batt_time=剩余时间
+metric.batt_time.desc=预计充满或放空所需时间
+metric.charger_deficit=充电器不足警告
+metric.charger_deficit.desc=充电器跟不上负载时发出警告 (CHG:)
+metric.batt_flow=功率流图
+metric.batt_flow.desc=电池充电/放电瓦数 (BAT:)
+metric.batt_temp=温度
+metric.batt_temp.desc=电池组温度 (BAT: C)
+metric.mem_load=负载
+metric.mem_load.desc=物理内存使用量 (RAM: %)
+metric.commit=提交内存
+metric.commit.desc=相对上限的已提交内存 (CMT:)
+metric.mem_total=物理内存总量
+metric.mem_total.desc=已安装内存
+metric.mem_avail=可用物理内存
+metric.mem_avail.desc=空闲内存
+metric.mem_page=可用页面文件
+metric.mem_page.desc=空闲页面文件空间
+metric.virtual_total=虚拟内存总量
+metric.virtual_total.desc=地址空间大小
+metric.virtual_avail=可用虚拟内存
+metric.virtual_avail.desc=空闲地址空间
+metric.virtual_ext=扩展虚拟内存
+metric.virtual_ext.desc=空闲扩展地址空间
+
+# --- 行为 ---
+behavior.start=随 Windows 启动
+behavior.start.desc=登录时启动，若开启「最小化到托盘」则进入托盘
+behavior.admin=以管理员身份运行
+behavior.admin.desc=帧计时需要（ETW）
+behavior.tray=最小化到托盘
+behavior.tray.desc=隐藏到托盘而非任务栏
+behavior.esc=按 ESC 退出
+behavior.esc.desc=按下 Escape 时关闭窗口
+behavior.autohide=自动隐藏悬浮窗
+behavior.autohide.desc=仅当游戏或全屏应用运行时显示悬浮窗
+behavior.clickthrough=悬浮窗点击穿透
+behavior.clickthrough.desc=让鼠标点击穿透悬浮窗（关闭后可交互）
+
+# --- 电池详情页 ---
+batt.none=未检测到电池
+batt.none.desc=电池设备无响应。Kestrel 仍会读取 CPU、GPU 和内存。
+batt.charging=充电中
+batt.discharging=放电中
+batt.idle=空闲
+batt.charge=电量
+batt.time_left=剩余 %ls
+batt.time_to_full=%ls 后充满
+batt.health=健康度
+batt.of_design=占设计容量
+batt.wear=%.0f%% 损耗
+batt.no_design=该电池未报告设计容量。
+batt.cycles=%d 次循环
+batt.cycles_unavailable=循环次数不可用
+batt.design_full=%.1f Wh 设计 · %.1f Wh 满充
+batt.chemistry=化学类型
+batt.power_state=电源状态
+batt.on_mains=使用电源
+batt.on_battery=使用电池
+batt.voltage=电压
+batt.power_draw=功耗
+batt.temperature=温度
+batt.time_to_empty=放空时间
+batt.time_to_full_label=充满时间
+batt.details=详情
+batt.alerts=警报
+batt.low=低电量
+batt.critical=电量严重不足
+batt.not_set=未设置
+batt.manufacturer=制造商
+batt.model=型号
+batt.serial=序列号
+batt.manufactured=制造日期
+batt.age=使用时长
+batt.battery=电池
+batt.footer=这些阈值由 Windows 管理，Kestrel 仅读取它们。
+
+# --- 设置页 ---
+settings.show_overlay=显示悬浮窗
+settings.show_overlay.desc=绘制在游戏之上的面板
+settings.preset=预设
+settings.shown=已显示 %d / %d
+settings.my_presets=我的预设
+settings.preset_hint=数字应用 · 箭头保存当前配置
+settings.admin=管理员
+settings.frame_admin=帧计时需要管理员权限
+settings.frame_admin.desc=ETW 会话创建对标准用户被拒绝。
+settings.restart_admin=以管理员身份重启
+settings.frame_wait=帧计时已开启 — 等待全屏应用
+settings.frame_wait.desc=打开游戏或 3D 应用，其帧数据会显示在这里。
+settings.overlay_off=悬浮窗已关闭。这些行仍会保存 — 不会绘制任何内容。
+settings.mem_units=内存单位
+settings.row=行
+settings.graph=图表
+settings.save_profile=为前台应用保存配置
+settings.no_package_power=本机没有封装功耗计数器。
+
+# --- 单位 ---
+units.auto=自动
+
+# --- 预览 ---
+preview.scaled=预览 · 实际大小的 %.0f%%
+preview.actual=预览 · 实际大小
+preview.nothing=未启用任何内容
+
+# --- 录制页 ---
+capture.session=会话
+capture.frames=%u 帧
+capture.fps_low=%.0f fps 平均 · %.0f 低
+capture.fps_avg=%.0f fps 平均
+capture.stop_save=停止并保存
+capture.saving=正在保存录制...
+capture.saving.desc=帧 CSV 和摘要正在后台写入。
+capture.wait=请稍候
+capture.failed=上次运行无法保存
+capture.failed.desc=没有内容进入录制文件夹。kestrel.log 记录了原因。
+capture.start=开始录制
+capture.record_title=录制一次运行并测量
+capture.record_desc=帧时间、封装功耗以及这次运行消耗的电池。
+capture.hotkey=或按 Ctrl+Alt+B
+capture.last_run=上次运行
+capture.saved=已保存的运行
+capture.none=尚未录制任何内容。
+capture.click=点击某次运行查看完整统计
+capture.run_detail=运行详情
+capture.open_folder=打开录制文件夹
+capture.footer=帧时间按每帧一行写入 CSV。
+capture.avg=平均
+capture.low1=1% 低
+capture.low01=0.1% 低
+capture.median=中位帧
+capture.worst=最差帧
+capture.stutters=卡顿
+capture.cpu_package=CPU 封装
+capture.energy=能耗
+capture.battery_life=电池续航
+capture.frames_meta=· %.0f 秒 · %u 帧
+capture.per_wh=%.0f 帧/瓦时
+capture.no_power=封装功耗不可读，因此无法测量能耗。
+
+# --- 外观页 ---
+appearance.theme=主题
+appearance.accent=强调色
+appearance.accent.desc=用于高亮、电量条和选中控件。
+appearance.position=悬浮窗位置
+appearance.graph_height=图表高度
+appearance.refresh=刷新率
+appearance.refresh.desc=游戏时降低重绘频率可节省开销
+appearance.scale=悬浮窗缩放
+appearance.scale.desc=游戏内面板及其文本的大小
+appearance.margin=悬浮窗边距
+appearance.margin.desc=与屏幕边缘的距离
+appearance.opacity=悬浮窗不透明度
+appearance.opacity.desc=游戏内面板的透明度
+
+# --- 关于页 ---
+about.version=版本 %d.%d.%d · 便携版
+about.desc1=电池健康、CPU 和 GPU 负载、封装功耗以及真实的
+about.desc2=逐应用帧计时，显示在始终置顶的悬浮窗中。
+about.repository=仓库
+about.issue=报告问题
+about.licence=许可证
+about.updates=更新
+about.check=检查更新
+about.contacting=正在连接 GitHub…
+about.checking=检查中…
+about.newest=%d.%d.%d 是最新版本
+about.update_available=版本 %ls 可用
+about.download=下载 %ls
+about.downloading_pct=下载中… %d%%
+about.downloading=下载中…
+about.update_ready=版本 %ls 已准备好安装
+about.install=安装并重启
+about.retry=重试
+about.no_check=Kestrel 不会自行检查更新。
+about.rollback=回滚
+about.rollback_to=回滚到 %ls
+about.diag_title=本机上 KESTREL 可读取的内容
+about.diag_frame=帧计时 (ETW)
+about.active=已启用
+about.unavailable=不可用
+about.diag_cpu_power=CPU 封装功耗
+about.energy_meter=能耗计计数器
+about.counter_missing=计数器不存在
+about.diag_gpu=GPU 负载
+about.no_adapter=无显卡
+about.diag_battery=电池
+about.one_device=1 个设备 · %ls
+about.no_device=无设备
+about.diag_per_core=每核心负载
+about.threads=%d 线程
+about.diag_hotkeys=全局热键
+about.registered=已注册
+about.open_log=打开日志文件
+about.footer=MIT 许可证 · github.com/semiloker/Kestrel
+
+# --- 对话框 ---
+msg.no_foreground=没有可测量的前台进程。请聚焦要录制的应用，并确保帧追踪正在运行。
+msg.restart_restored=Kestrel 无法启动替换程序。已恢复之前的文件布局。
+msg.restart_failed=Kestrel 无法启动替换程序，自动文件恢复也失败。请从官方发布重新安装 Kestrel。
+msg.window_failed=无法创建窗口！
+msg.elevate_failed=无法以管理员权限重启。\n请关闭 Kestrel，然后用“以管理员身份运行”启动它。
+msg.install_failed=无法安装更新。\n如果 Kestrel 以管理员身份运行，请将其移到受管理员保护的文件夹（例如 Program Files）。\n否则，请确保其当前文件夹可写，然后重试。
+msg.rollback_failed=无法恢复到先前的版本。
+
+# --- 托盘菜单 ---
+tray.open=打开
+tray.hide_overlay=隐藏悬浮窗
+tray.show_overlay=显示悬浮窗
+tray.exit=退出

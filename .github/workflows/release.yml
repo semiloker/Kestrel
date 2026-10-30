@@ -181,6 +181,7 @@ jobs:
           Copy-Item -LiteralPath $canonicalExe.FullName -Destination $packageRoot.FullName
           Copy-Item -LiteralPath "README.md" -Destination $packageRoot.FullName
           Copy-Item -LiteralPath "LICENSE" -Destination $packageRoot.FullName
+          Copy-Item -LiteralPath "lang/zh.lang" -Destination $packageRoot.FullName
 
           $hash = (Get-FileHash -LiteralPath $publishedExe -Algorithm SHA256).Hash.ToLowerInvariant()
           $checksumPath = Join-Path $releaseRoot.FullName "kestrel.exe.sha256"
@@ -192,7 +193,7 @@ jobs:
 
           $verificationRoot = New-Item -ItemType Directory -Path "package-verification"
           Expand-Archive -LiteralPath $zipPath -DestinationPath $verificationRoot.FullName
-          $expectedEntries = @("kestrel.exe", "LICENSE", "README.md")
+          $expectedEntries = @("kestrel.exe", "LICENSE", "README.md", "zh.lang")
           $actualEntries = @(
             Get-ChildItem -LiteralPath $verificationRoot.FullName -File |
               Sort-Object Name |

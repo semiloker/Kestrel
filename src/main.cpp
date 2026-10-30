@@ -410,7 +410,8 @@ bool win_bi::Create(int nCmdShow, bool startInTray)
     if (!hwnd)
     {
         log_bi::writeErr(GetLastError(), "CreateWindowEx failed");
-        MessageBox(NULL, "Could not create a window!", "Error", MB_ICONEXCLAMATION | MB_OK);
+        MessageBoxW(NULL, i18n_bi::tr("msg.window_failed", L"Could not create a window!"),
+                    L"Kestrel", MB_ICONEXCLAMATION | MB_OK);
         return false;
     }
 
@@ -733,9 +734,10 @@ void win_bi::ToggleCapture()
         {
             MessageBoxW(
                 hwnd,
-                L"No measurable foreground process is available. Focus the "
-                L"application you want to capture and make sure frame tracing "
-                L"is running.",
+                i18n_bi::tr("msg.no_foreground",
+                    L"No measurable foreground process is available. Focus the "
+                    L"application you want to capture and make sure frame tracing "
+                    L"is running."),
                 L"Kestrel", MB_ICONINFORMATION | MB_OK);
             return;
         }
@@ -798,12 +800,15 @@ void win_bi::ShowTrayMenu()
     HMENU hMenu = CreatePopupMenu();
     if (hMenu)
     {
-        InsertMenu(hMenu, -1, MF_BYPOSITION | MF_STRING, 1, "Open");
-        InsertMenu(hMenu, -1, MF_BYPOSITION | MF_STRING, 3,
-                   ov_bi && ov_bi->show_on_screen_display ? "Hide overlay\tCtrl+Alt+H"
-                                                          : "Show overlay\tCtrl+Alt+H");
+        std::wstring overlayItem = ov_bi && ov_bi->show_on_screen_display
+                                       ? i18n_bi::tr("tray.hide_overlay", L"Hide overlay")
+                                       : i18n_bi::tr("tray.show_overlay", L"Show overlay");
+        overlayItem += L"\tCtrl+Alt+H";
+
+        InsertMenuW(hMenu, -1, MF_BYPOSITION | MF_STRING, 1, i18n_bi::tr("tray.open", L"Open"));
+        InsertMenuW(hMenu, -1, MF_BYPOSITION | MF_STRING, 3, overlayItem.c_str());
         InsertMenu(hMenu, -1, MF_BYPOSITION | MF_SEPARATOR, 0, NULL);
-        InsertMenu(hMenu, -1, MF_BYPOSITION | MF_STRING, 2, "Exit");
+        InsertMenuW(hMenu, -1, MF_BYPOSITION | MF_STRING, 2, i18n_bi::tr("tray.exit", L"Exit"));
 
         SetForegroundWindow(hwnd);
         SendMessage(hwnd, WM_NULL, 0, 0);
@@ -1515,10 +1520,11 @@ void win_bi::RunAction(int action)
         else
         {
             log_bi::write("elevated restart failed");
-            MessageBoxA(hwnd,
-                        "Could not restart with administrator rights.\n"
-                        "Close Kestrel and start it with 'Run as administrator'.",
-                        APP_NAME, MB_ICONWARNING | MB_OK);
+            MessageBoxW(hwnd,
+                        i18n_bi::tr("msg.elevate_failed",
+                            L"Could not restart with administrator rights.\n"
+                            L"Close Kestrel and start it with 'Run as administrator'."),
+                        L"Kestrel", MB_ICONWARNING | MB_OK);
         }
         break;
 
@@ -1575,12 +1581,13 @@ void win_bi::RunAction(int action)
         }
         else
         {
-            MessageBoxA(hwnd,
-                        "Could not install the update.\n"
-                        "If Kestrel is elevated, move it to an administrator-protected\n"
-                        "folder such as Program Files. Otherwise, make sure its current\n"
-                        "folder is writable and try again.",
-                        APP_NAME, MB_ICONWARNING | MB_OK);
+            MessageBoxW(hwnd,
+                        i18n_bi::tr("msg.install_failed",
+                            L"Could not install the update.\n"
+                            L"If Kestrel is elevated, move it to an administrator-protected\n"
+                            L"folder such as Program Files. Otherwise, make sure its current\n"
+                            L"folder is writable and try again."),
+                        L"Kestrel", MB_ICONWARNING | MB_OK);
         }
         break;
 
@@ -1610,8 +1617,9 @@ void win_bi::RunAction(int action)
         }
         else
         {
-            MessageBoxA(hwnd, "Could not restore the previous version.",
-                        APP_NAME, MB_ICONWARNING | MB_OK);
+            MessageBoxW(hwnd,
+                        i18n_bi::tr("msg.rollback_failed", L"Could not restore the previous version."),
+                        L"Kestrel", MB_ICONWARNING | MB_OK);
         }
         break;
 
@@ -2083,11 +2091,13 @@ int WINAPI WinMain(HINSTANCE hInstance, [[maybe_unused]] HINSTANCE hPrevInstance
             MessageBoxW(
                 NULL,
                 restored
-                    ? L"Kestrel could not start the replacement program. "
-                      L"The previous file layout was restored."
-                    : L"Kestrel could not start the replacement program, and "
-                      L"automatic file recovery also failed. Reinstall Kestrel "
-                      L"from the official release.",
+                    ? i18n_bi::tr("msg.restart_restored",
+                        L"Kestrel could not start the replacement program. "
+                        L"The previous file layout was restored.")
+                    : i18n_bi::tr("msg.restart_failed",
+                        L"Kestrel could not start the replacement program, and "
+                        L"automatic file recovery also failed. Reinstall Kestrel "
+                        L"from the official release."),
                 L"Kestrel", MB_ICONERROR | MB_OK);
             result = 4;
         }

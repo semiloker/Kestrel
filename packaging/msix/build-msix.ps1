@@ -23,6 +23,7 @@ New-Item -ItemType Directory -Path $stage | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $stage "assets") | Out-Null
 
 Copy-Item $ExePath (Join-Path $stage "kestrel.exe")
+Copy-Item (Join-Path $PSScriptRoot "..\..\lang\zh.lang") (Join-Path $stage "zh.lang")
 Copy-Item (Join-Path $PSScriptRoot $Manifest) (Join-Path $stage "AppxManifest.xml")
 
 # Store logos: reuse the app icon PNGs if present, else placeholders must be added.
