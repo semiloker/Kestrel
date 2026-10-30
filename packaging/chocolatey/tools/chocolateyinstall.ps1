@@ -6,7 +6,7 @@ $packageArgs = @{
   packageName  = 'kestrel'
   url64bit     = 'https://github.com/semiloker/Kestrel/releases/download/v1.6.0/kestrel.exe'
   # Fill in after the release asset is uploaded (Get-FileHash -Algorithm SHA256):
-  checksum64   = '73cefaf497e414457fe57a5e42d2c2885552075babd7ce044418acc2c3b137a1'
+  checksum64   = '1f5f5cf56d348adae4ac014bc678c705be01717a4c4d128b80a8f49fee29ed5e'
   checksumType64 = 'sha256'
   fileFullPath = Join-Path $toolsDir 'kestrel.exe'
 }
